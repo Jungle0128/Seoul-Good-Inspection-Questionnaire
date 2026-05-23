@@ -1,4 +1,4 @@
-# Shop Inspection Scoring Form
+# Seoul Good Inspection Scoring Form
 
 This project is a static Vite + React app for shop inspection scoring, built for Netlify deployment and Supabase inserts.
 
