@@ -1,8 +1,10 @@
-import { type FormEvent, useEffect, useMemo, useState } from 'react'
+import { type FormEvent, useEffect, useId, useMemo, useState } from 'react'
 import { submissionTable, supabase, supabaseConfigured } from './lib/supabase'
 import { rubricSections, rubricVersion, type RubricQuestion } from './rubric'
 
-type AnswerMap = Record<string, number | null>
+type AnswerValue = number | boolean | null
+
+type AnswerMap = Record<string, AnswerValue>
 
 type NoticeTone = 'success' | 'warning' | 'error' | 'info'
 
@@ -11,9 +13,36 @@ type Notice = {
   message: string
 }
 
-type PreviewMode = 'csv' | 'pdf'
+type PreviewMode = 'csv' | 'png'
 
-const today = new Date().toISOString().slice(0, 10)
+const storeOptions = [
+  'SG Lippulaiva',
+  'SG Kaari',
+  'SG Skanssi',
+  'SG Iso Omena',
+  'SG Mylly',
+  'SG Hansa',
+  'SG Itis',
+  'SG Ideapark Seinäjoki',
+  'SG Seppä',
+  'SG Matkus',
+  'SG Karisma',
+  'SG Valkea',
+  'SG Ratina',
+  'SG Koskikeskus',
+  'SG Sello',
+  'SG Ideapark Lempälä',
+  'SG Redi',
+  'SG Kluuvi',
+  'SG Ideapark Oulu',
+  'SG Puuvilla Pori',
+] as const
+
+function getCurrentLocalDateTimeValue() {
+  const now = new Date()
+  const offsetMs = now.getTimezoneOffset() * 60000
+  return new Date(now.getTime() - offsetMs).toISOString().slice(0, 16)
+}
 
 function buildInitialAnswers(): AnswerMap {
   return rubricSections.reduce<AnswerMap>((accumulator, section) => {
@@ -27,6 +56,49 @@ function buildInitialAnswers(): AnswerMap {
 
 function formatPercent(value: number): string {
   return `${value.toFixed(1)}%`
+}
+
+function isBooleanQuestion(question: RubricQuestion) {
+  return question.answerType === 'boolean'
+}
+
+function isNormalBooleanQuestion(question: RubricQuestion) {
+  return question.booleanScoring === 'normal'
+}
+
+function getQuestionScore(question: RubricQuestion, answer: AnswerValue): number {
+  if (isBooleanQuestion(question)) {
+    if (isNormalBooleanQuestion(question)) {
+      return answer === true ? question.maxScore : 0
+    }
+
+    return answer === true ? 0 : question.maxScore
+  }
+
+  return typeof answer === 'number' ? answer : 0
+}
+
+function formatQuestionAnswer(question: RubricQuestion, answer: AnswerValue): string {
+  if (isBooleanQuestion(question)) {
+    const yesScore = isNormalBooleanQuestion(question) ? question.maxScore : 0
+    const noScore = isNormalBooleanQuestion(question) ? 0 : question.maxScore
+
+    if (answer === true) {
+      return `是（${yesScore}/${question.maxScore}）`
+    }
+
+    if (answer === false) {
+      return `否（${noScore}/${question.maxScore}）`
+    }
+
+    return `未选择（${noScore}/${question.maxScore}）`
+  }
+
+  if (typeof answer === 'number') {
+    return `${answer}/${question.maxScore}`
+  }
+
+  return `未评分（0/${question.maxScore}）`
 }
 
 function escapeCsvValue(value: string): string {
@@ -43,13 +115,13 @@ function buildSubmissionRows(params: {
     section.questions.map((question) => ({
       section_title: section.title,
       question_label: question.label,
-      score: params.answers[question.id] ?? 0,
+      score: getQuestionScore(question, params.answers[question.id]),
       max_score: question.maxScore,
     })),
   )
 
   const sectionRows = rubricSections.map((section) => {
-    const sectionScores = section.questions.map((question) => params.answers[question.id] ?? 0)
+    const sectionScores = section.questions.map((question) => getQuestionScore(question, params.answers[question.id]))
     const answeredCount = section.questions.filter((question) => params.answers[question.id] !== null).length
 
     return {
@@ -67,19 +139,21 @@ function buildCsvPreview(params: {
   inspectorName: string
   storeName: string
   inspectionDate: string
-  overallNotes: string
+  operationSuggestions: string
+  storeFeedback: string
   answers: AnswerMap
 }) {
   const { questionRows, sectionRows } = buildSubmissionRows(params)
   const headers = [
-    'inspection_date',
-    'inspector_name',
-    'store_name',
-    'section_title',
-    'question_label',
-    'score',
-    'max_score',
-    'overall_notes',
+    '检查日期',
+    '检查员',
+    '门店',
+    '评分板块',
+    '题目',
+    '得分',
+    '满分',
+    '运营提升建议',
+    '门店反馈',
   ]
 
   const lines = [
@@ -93,13 +167,14 @@ function buildCsvPreview(params: {
         row.question_label,
         String(row.score),
         String(row.max_score),
-        params.overallNotes || '',
+        params.operationSuggestions || '',
+        params.storeFeedback || '',
       ]
         .map(escapeCsvValue)
         .join(','),
     ),
     '',
-    'section_summary,score,max_score,answered_count',
+    '板块汇总,得分,满分,已答题数',
     ...sectionRows.map((row) =>
       [row.section_title, String(row.score), String(row.max_score), String(row.answered_count)]
         .map(escapeCsvValue)
@@ -110,8 +185,7 @@ function buildCsvPreview(params: {
   return lines.join('\n')
 }
 
-function buildPdfBlob(
-  PdfDocument: typeof import('jspdf').jsPDF,
+async function buildPngBlob(
   params: {
     inspectorName: string
     storeName: string
@@ -120,7 +194,8 @@ function buildPdfBlob(
     maxScore: number
     scorePercent: number
     completionPercent: number
-    overallNotes: string
+    operationSuggestions: string
+    storeFeedback: string
     sectionStats: Array<{
       title: string
       sectionScore: number
@@ -130,84 +205,211 @@ function buildPdfBlob(
     }>
   },
 ) {
-  const doc = new PdfDocument({ unit: 'pt', format: 'a4' })
-  const pageWidth = doc.internal.pageSize.getWidth()
-  const pageHeight = doc.internal.pageSize.getHeight()
-  const marginX = 40
-  const contentWidth = pageWidth - marginX * 2
-  const lineHeight = 16
-  let cursorY = 46
+  const canvasScale = 2
+  const pageWidth = 794
+  const canvasWidth = Math.round(pageWidth * canvasScale)
+  const marginX = 80
+  const marginY = 72
+  const contentWidth = canvasWidth - marginX * 2
+  const fontFamily = '"Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", "Source Han Sans SC", sans-serif'
 
-  const ensureSpace = (neededHeight: number) => {
-    if (cursorY + neededHeight > pageHeight - 44) {
-      doc.addPage()
-      cursorY = 46
-    }
+  const measureCanvas = document.createElement('canvas')
+  measureCanvas.width = canvasWidth
+  measureCanvas.height = 1
+  const measureContext = measureCanvas.getContext('2d')
+
+  if (!measureContext) {
+    throw new Error('无法创建 PNG 渲染画布。')
   }
 
-  const writeLine = (text: string, size = 11, bold = false, gapAfter = 0) => {
-    ensureSpace(lineHeight + gapAfter)
-    doc.setFont('helvetica', bold ? 'bold' : 'normal')
-    doc.setFontSize(size)
-    const lines = doc.splitTextToSize(text, contentWidth)
-    doc.text(lines, marginX, cursorY)
-    cursorY += Array.isArray(lines) ? lines.length * lineHeight : lineHeight
-    cursorY += gapAfter
-  }
+  measureContext.textBaseline = 'top'
 
-  doc.setFont('helvetica', 'bold')
-  doc.setFontSize(20)
-  doc.text('Shop inspection summary', marginX, cursorY)
-  cursorY += 28
+  const wrapText = (text: string, fontSize: number, fontWeight: number, maxWidth: number) => {
+    measureContext.font = `${fontWeight} ${fontSize}px ${fontFamily}`
+    const lines: string[] = []
 
-  writeLine(`Inspector: ${params.inspectorName}`, 11, false)
-  writeLine(`Store: ${params.storeName}`, 11, false)
-  writeLine(`Inspection date: ${params.inspectionDate}`, 11, false, 4)
+    text.split('\n').forEach((paragraph) => {
+      if (!paragraph) {
+        lines.push('')
+        return
+      }
 
-  writeLine(`Score: ${params.totalScore}/${params.maxScore} (${formatPercent(params.scorePercent)})`, 12, true)
-  writeLine(`Completion: ${formatPercent(params.completionPercent)}`, 11, false, 10)
+      let currentLine = ''
 
-  params.sectionStats.forEach((section) => {
-    ensureSpace(70)
-    doc.setFont('helvetica', 'bold')
-    doc.setFontSize(14)
-    doc.text(section.title, marginX, cursorY)
-    cursorY += 18
+      Array.from(paragraph).forEach((character) => {
+        const nextLine = currentLine + character
+        if (measureContext.measureText(nextLine).width <= maxWidth || !currentLine) {
+          currentLine = nextLine
+        } else {
+          lines.push(currentLine)
+          currentLine = character
+        }
+      })
 
-    doc.setFont('helvetica', 'normal')
-    doc.setFontSize(10)
-    doc.text(
-      `${section.sectionScore}/${section.sectionMaxScore} total | ${section.answeredCount}/${section.questions.length} answered`,
-      marginX,
-      cursorY,
-    )
-    cursorY += 18
-
-    section.questions.forEach((question) => {
-      ensureSpace(24)
-      doc.setFont('helvetica', 'normal')
-      doc.setFontSize(10)
-      const questionLines = doc.splitTextToSize(`${question.label}: ${question.score}/${question.maxScore}`, contentWidth)
-      doc.text(questionLines, marginX + 10, cursorY)
-      cursorY += Array.isArray(questionLines) ? questionLines.length * lineHeight : lineHeight
+      if (currentLine) {
+        lines.push(currentLine)
+      }
     })
 
-    cursorY += 8
-  })
-
-  if (params.overallNotes.trim()) {
-    ensureSpace(80)
-    doc.setFont('helvetica', 'bold')
-    doc.setFontSize(14)
-    doc.text('Overall notes', marginX, cursorY)
-    cursorY += 18
-    doc.setFont('helvetica', 'normal')
-    doc.setFontSize(10)
-    const noteLines = doc.splitTextToSize(params.overallNotes.trim(), contentWidth)
-    doc.text(noteLines, marginX, cursorY)
+    return lines.length > 0 ? lines : ['']
   }
 
-  return doc.output('blob')
+  type RenderBlock = {
+    text: string
+    fontSize: number
+    fontWeight: number
+    indent: number
+    lineHeight: number
+    gapAfter: number
+    color?: string
+  }
+
+  const blocks: RenderBlock[] = [
+    {
+      text: '巡店评分汇总',
+      fontSize: 40,
+      fontWeight: 700,
+      indent: 0,
+      lineHeight: 54,
+      gapAfter: 18,
+      color: '#111827',
+    },
+    { text: `检查员：${params.inspectorName}`, fontSize: 23, fontWeight: 400, indent: 0, lineHeight: 34, gapAfter: 6 },
+    { text: `门店：${params.storeName}`, fontSize: 23, fontWeight: 400, indent: 0, lineHeight: 34, gapAfter: 6 },
+    { text: `检查日期：${params.inspectionDate}`, fontSize: 23, fontWeight: 400, indent: 0, lineHeight: 34, gapAfter: 16 },
+    {
+      text: `综合评分：${params.totalScore}/${params.maxScore}（${formatPercent(params.scorePercent)}）`,
+      fontSize: 28,
+      fontWeight: 700,
+      indent: 0,
+      lineHeight: 40,
+      gapAfter: 8,
+    },
+    {
+      text: `完成进度：${formatPercent(params.completionPercent)}`,
+      fontSize: 23,
+      fontWeight: 400,
+      indent: 0,
+      lineHeight: 34,
+      gapAfter: 18,
+    },
+  ]
+
+  params.sectionStats.forEach((section) => {
+    blocks.push(
+      {
+        text: section.title,
+        fontSize: 30,
+        fontWeight: 700,
+        indent: 0,
+        lineHeight: 42,
+        gapAfter: 8,
+        color: '#0f766e',
+      },
+      {
+        text: `${section.sectionScore}/${section.sectionMaxScore} 总分｜${section.answeredCount}/${section.questions.length} 已答`,
+        fontSize: 20,
+        fontWeight: 400,
+        indent: 0,
+        lineHeight: 30,
+        gapAfter: 12,
+        color: '#374151',
+      },
+    )
+
+    section.questions.forEach((question) => {
+      blocks.push({
+        text: `${question.label}: ${question.score}/${question.maxScore}`,
+        fontSize: 20,
+        fontWeight: 400,
+        indent: 24,
+        lineHeight: 30,
+        gapAfter: 8,
+        color: '#111827',
+      })
+    })
+
+    blocks.push({ text: '', fontSize: 1, fontWeight: 400, indent: 0, lineHeight: 12, gapAfter: 8 })
+  })
+
+  if (params.operationSuggestions.trim()) {
+    blocks.push(
+      { text: '运营提升建议', fontSize: 30, fontWeight: 700, indent: 0, lineHeight: 42, gapAfter: 10, color: '#0f766e' },
+      {
+        text: params.operationSuggestions.trim(),
+        fontSize: 20,
+        fontWeight: 400,
+        indent: 0,
+        lineHeight: 30,
+        gapAfter: 16,
+        color: '#111827',
+      },
+    )
+  }
+
+  if (params.storeFeedback.trim()) {
+    blocks.push(
+      { text: '门店反馈', fontSize: 30, fontWeight: 700, indent: 0, lineHeight: 42, gapAfter: 10, color: '#0f766e' },
+      {
+        text: params.storeFeedback.trim(),
+        fontSize: 20,
+        fontWeight: 400,
+        indent: 0,
+        lineHeight: 30,
+        gapAfter: 16,
+        color: '#111827',
+      },
+    )
+  }
+
+  const laidOutBlocks = blocks.map((block) => {
+    const wrappedLines = wrapText(block.text, block.fontSize, block.fontWeight, contentWidth - block.indent)
+    return {
+      ...block,
+      wrappedLines,
+      height: wrappedLines.length * block.lineHeight + block.gapAfter,
+    }
+  })
+
+  const totalHeight = laidOutBlocks.reduce((sum, block) => sum + block.height, marginY * 2)
+  const canvas = document.createElement('canvas')
+  canvas.width = canvasWidth
+  canvas.height = totalHeight
+
+  const context = canvas.getContext('2d')
+
+  if (!context) {
+    throw new Error('无法创建 PNG 渲染画布。')
+  }
+
+  context.fillStyle = '#ffffff'
+  context.fillRect(0, 0, canvas.width, canvas.height)
+  context.textBaseline = 'top'
+
+  let cursorY = marginY
+
+  laidOutBlocks.forEach((block) => {
+    context.font = `${block.fontWeight} ${block.fontSize}px ${fontFamily}`
+    context.fillStyle = block.color ?? '#111827'
+
+    block.wrappedLines.forEach((line) => {
+      context.fillText(line, marginX + block.indent, cursorY)
+      cursorY += block.lineHeight
+    })
+
+    cursorY += block.gapAfter
+  })
+
+  return await new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (!blob) {
+        reject(new Error('无法生成 PNG 预览。'))
+        return
+      }
+
+      resolve(blob)
+    }, 'image/png')
+  })
 }
 
 function ScoreButtons({
@@ -216,9 +418,36 @@ function ScoreButtons({
   onChange,
 }: {
   question: RubricQuestion
-  value: number | null
-  onChange: (score: number) => void
+  value: AnswerValue
+  onChange: (score: number | boolean) => void
 }) {
+  if (isBooleanQuestion(question)) {
+    const options = [
+      { label: '否', value: false },
+      { label: '是', value: true },
+    ]
+
+    return (
+      <div className="score-group" role="radiogroup" aria-label={question.label}>
+        {options.map((option) => {
+          const active = value === option.value
+
+          return (
+            <button
+              key={option.label}
+              type="button"
+              className={active ? 'score-option score-option-active' : 'score-option'}
+              aria-pressed={active}
+              onClick={() => onChange(option.value)}
+            >
+              {option.label}
+            </button>
+          )
+        })}
+      </div>
+    )
+  }
+
   const options = Array.from({ length: question.maxScore + 1 }, (_, index) => index)
 
   return (
@@ -242,11 +471,114 @@ function ScoreButtons({
   )
 }
 
+function StoreSearchSelect({
+  value,
+  onChange,
+  options,
+  placeholder,
+}: {
+  value: string
+  onChange: (storeName: string) => void
+  options: readonly string[]
+  placeholder: string
+}) {
+  const listboxId = useId()
+  const [query, setQuery] = useState(value)
+  const [isOpen, setIsOpen] = useState(false)
+
+  const filteredOptions = useMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase()
+
+    if (!normalizedQuery) {
+      return options
+    }
+
+    return options.filter((option) => option.toLowerCase().includes(normalizedQuery))
+  }, [options, query])
+
+  const selectStore = (storeName: string) => {
+    setQuery(storeName)
+    onChange(storeName)
+    setIsOpen(false)
+  }
+
+  return (
+    <div
+      className="store-combobox"
+      role="combobox"
+      aria-expanded={isOpen}
+      aria-controls={listboxId}
+      aria-haspopup="listbox"
+    >
+      <input
+        className="store-combobox-input"
+        type="text"
+        value={query}
+        onChange={(event) => {
+          const nextQuery = event.target.value
+          setQuery(nextQuery)
+          onChange(options.some((option) => option.toLowerCase() === nextQuery.trim().toLowerCase()) ? nextQuery.trim() : '')
+          setIsOpen(true)
+        }}
+        onFocus={() => setIsOpen(true)}
+        onBlur={() => setIsOpen(false)}
+        onKeyDown={(event) => {
+          if (event.key === 'Escape') {
+            setIsOpen(false)
+            return
+          }
+
+          if (event.key === 'Enter' && filteredOptions.length > 0) {
+            event.preventDefault()
+            selectStore(filteredOptions[0])
+          }
+        }}
+        placeholder={placeholder}
+        autoComplete="off"
+        required
+      />
+
+      {isOpen && (
+        <div className="store-combobox-panel">
+          <div className="store-combobox-meta">
+            <span>输入关键词快速筛选门店</span>
+            <span>{filteredOptions.length} 项</span>
+          </div>
+
+          <ul id={listboxId} className="store-combobox-list" role="listbox">
+            {filteredOptions.length > 0 ? (
+              filteredOptions.map((storeOption) => {
+                const active = storeOption === value
+
+                return (
+                  <li key={storeOption} role="option" aria-selected={active}>
+                    <button
+                      type="button"
+                      className={active ? 'store-combobox-option store-combobox-option-active' : 'store-combobox-option'}
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => selectStore(storeOption)}
+                    >
+                      {storeOption}
+                    </button>
+                  </li>
+                )
+              })
+            ) : (
+              <li className="store-combobox-empty">没有匹配的门店，试试换个关键词。</li>
+            )}
+          </ul>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function App() {
   const [inspectorName, setInspectorName] = useState('')
   const [storeName, setStoreName] = useState('')
-  const [inspectionDate, setInspectionDate] = useState(today)
-  const [overallNotes, setOverallNotes] = useState('')
+  const [inspectionDate, setInspectionDate] = useState(getCurrentLocalDateTimeValue)
+  const [operationSuggestions, setOperationSuggestions] = useState('')
+  const [storeFeedback, setStoreFeedback] = useState('')
   const [answers, setAnswers] = useState<AnswerMap>(() => buildInitialAnswers())
   const [submitting, setSubmitting] = useState(false)
   const [previewMode, setPreviewMode] = useState<PreviewMode | null>(null)
@@ -256,13 +588,11 @@ function App() {
     supabaseConfigured
       ? {
           tone: 'info',
-          message:
-            'Edit src/rubric.ts to add, remove, or reorder scoring items without changing the UI.',
+          message: '修改 src/rubric.ts 就能增删评分项，不需要改页面结构。',
         }
       : {
           tone: 'warning',
-          message:
-            'Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to enable submission saving.',
+          message: '请先设置 VITE_SUPABASE_URL 和 VITE_SUPABASE_ANON_KEY。',
         },
   )
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null)
@@ -277,7 +607,7 @@ function App() {
       rubricSections.map((section) => {
         const sectionAnswers = section.questions.map((question) => answers[question.id])
         const answeredCount = sectionAnswers.filter((score) => score !== null).length
-        const sectionScore = sectionAnswers.reduce<number>((sum, score) => sum + (score ?? 0), 0)
+        const sectionScore = section.questions.reduce((sum, question) => sum + getQuestionScore(question, answers[question.id]), 0)
         const sectionMaxScore = section.questions.reduce((sum, question) => sum + question.maxScore, 0)
 
         return {
@@ -293,7 +623,7 @@ function App() {
   const totalQuestions = allQuestions.length
   const answeredCount = allQuestions.filter(({ question }) => answers[question.id] !== null).length
   const missingQuestions = allQuestions.filter(({ question }) => answers[question.id] === null)
-  const totalScore = allQuestions.reduce((sum, { question }) => sum + (answers[question.id] ?? 0), 0)
+  const totalScore = allQuestions.reduce((sum, { question }) => sum + getQuestionScore(question, answers[question.id]), 0)
   const maxScore = allQuestions.reduce((sum, { question }) => sum + question.maxScore, 0)
   const completionPercent = totalQuestions === 0 ? 0 : (answeredCount / totalQuestions) * 100
   const scorePercent = maxScore === 0 ? 0 : (totalScore / maxScore) * 100
@@ -319,10 +649,11 @@ function App() {
 
   const openCsvPreview = () => {
     const csv = buildCsvPreview({
-      inspectorName: inspectorName.trim() || 'Not entered',
-      storeName: storeName.trim() || 'Not entered',
+      inspectorName: inspectorName.trim() || '未填写',
+      storeName: storeName.trim() || '未填写',
       inspectionDate,
-      overallNotes,
+      operationSuggestions,
+      storeFeedback,
       answers,
     })
 
@@ -330,19 +661,18 @@ function App() {
     setPreviewMode('csv')
   }
 
-  const openPdfPreview = async () => {
+  const openPngPreview = async () => {
     try {
-      const { jsPDF } = await import('jspdf')
-
-      const blob = buildPdfBlob(jsPDF, {
-        inspectorName: inspectorName.trim() || 'Not entered',
-        storeName: storeName.trim() || 'Not entered',
+      const blob = await buildPngBlob({
+        inspectorName: inspectorName.trim() || '未填写',
+        storeName: storeName.trim() || '未填写',
         inspectionDate,
         totalScore,
         maxScore,
         scorePercent,
         completionPercent,
-        overallNotes,
+        operationSuggestions,
+        storeFeedback,
         sectionStats: sectionStats.map((section) => ({
           title: section.section.title,
           sectionScore: section.sectionScore,
@@ -350,7 +680,7 @@ function App() {
           answeredCount: section.answeredCount,
           questions: section.section.questions.map((question) => ({
             label: question.label,
-            score: answers[question.id] ?? 0,
+            score: getQuestionScore(question, answers[question.id]),
             maxScore: question.maxScore,
           })),
         })),
@@ -363,16 +693,16 @@ function App() {
 
       setPreviewUrl(url)
       setPreviewContent('')
-      setPreviewMode('pdf')
+      setPreviewMode('png')
     } catch {
       setNotice({
         tone: 'error',
-        message: 'PDF preview could not be loaded. Try again or use the CSV preview.',
+        message: 'PNG preview could not be loaded. Try again or use the CSV preview.',
       })
     }
   }
 
-  const setQuestionScore = (questionId: string, score: number) => {
+  const setQuestionScore = (questionId: string, score: number | boolean) => {
     setAnswers((current) => ({
       ...current,
       [questionId]: score,
@@ -383,14 +713,14 @@ function App() {
     event.preventDefault()
 
     if (!allFieldsFilled) {
-      setNotice({ tone: 'error', message: 'Inspector, store, and date are required.' })
+      setNotice({ tone: 'error', message: '检查员、门店和日期不能为空。' })
       return
     }
 
     if (missingQuestions.length > 0) {
       setNotice({
         tone: 'error',
-        message: `Please score all ${missingQuestions.length} remaining question(s) before submitting.`,
+        message: `请先完成剩余 ${missingQuestions.length} 个评分项，再提交。`,
       })
       return
     }
@@ -398,7 +728,7 @@ function App() {
     if (!supabaseConfigured || !supabase) {
       setNotice({
         tone: 'warning',
-        message: 'Supabase is not configured yet. Set the environment variables before saving.',
+        message: '数据库还未配置，请先设置环境变量。',
       })
       return
     }
@@ -413,8 +743,7 @@ function App() {
     const answerSummary = rubricSections
       .map((section) => {
         const sectionLines = section.questions.map((question) => {
-          const score = answers[question.id] ?? 0
-          return `- ${question.label}: ${score}/${question.maxScore}`
+          return `- ${question.label}: ${formatQuestionAnswer(question, answers[question.id])}`
         })
 
         return [section.title, ...sectionLines].join('\n')
@@ -429,7 +758,7 @@ function App() {
       .join(' | ')
 
     setSubmitting(true)
-    setNotice({ tone: 'info', message: `Saving to ${submissionTable}...` })
+    setNotice({ tone: 'info', message: `正在保存到 ${submissionTable} ...` })
 
     try {
       const { error } = await supabase.from(submissionTable).insert([
@@ -443,7 +772,8 @@ function App() {
           score_percent: Number(scorePercent.toFixed(2)),
           answered_count: answeredCount,
           total_questions: totalQuestions,
-          overall_notes: overallNotes.trim() || null,
+          operational_improvement_suggestions: operationSuggestions.trim() || null,
+          store_feedback: storeFeedback.trim() || null,
           answer_summary: answerSummary,
           section_summary: sectionSummary,
           answers: answerRows,
@@ -459,10 +789,38 @@ function App() {
       setLastSavedAt(savedAt)
       setNotice({
         tone: 'success',
-        message: `Submission saved successfully at ${savedAt}.`,
+        message: `提交已成功保存，时间：${savedAt}。`,
       })
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown Supabase error.'
+      const errorObject = error && typeof error === 'object' ? error : null
+      const errorMessage =
+        errorObject && 'message' in errorObject && typeof errorObject.message === 'string'
+          ? errorObject.message
+          : error instanceof Error
+            ? error.message
+            : ''
+      const errorCode = errorObject && 'code' in errorObject && typeof errorObject.code === 'string' ? errorObject.code : ''
+      const errorDetails = errorObject && 'details' in errorObject && typeof errorObject.details === 'string' ? errorObject.details : ''
+      const errorHint = errorObject && 'hint' in errorObject && typeof errorObject.hint === 'string' ? errorObject.hint : ''
+      const normalizedMessage = `${errorMessage} ${errorDetails} ${errorHint}`.toLowerCase()
+
+      let message = '数据库发生未知错误。'
+
+      if (errorCode === '42501' || normalizedMessage.includes('row-level security') || normalizedMessage.includes('permission denied')) {
+        message = '数据库拒绝了这次写入。请确认已经在 Supabase 里执行了建表 SQL，并且为 inspection_submissions 配好了允许 anon 插入的 RLS policy。'
+      } else if (normalizedMessage.includes('relation') && normalizedMessage.includes('does not exist')) {
+        message = '数据库里还没有 inspection_submissions 这张表。请先在 Supabase SQL Editor 执行建表脚本。'
+      } else if (errorMessage) {
+        message = [
+          '数据库保存失败。',
+          `message: ${errorMessage}`,
+          errorCode ? `code: ${errorCode}` : null,
+          errorDetails ? `details: ${errorDetails}` : null,
+          errorHint ? `hint: ${errorHint}` : null,
+        ]
+          .filter(Boolean)
+          .join('\n')
+      }
       setNotice({
         tone: 'error',
         message,
@@ -472,7 +830,7 @@ function App() {
     }
   }
 
-  const previewTitle = previewMode === 'csv' ? 'CSV preview' : 'PDF preview'
+  const previewTitle = previewMode === 'csv' ? 'CSV 预览' : 'PNG 预览'
 
   return (
     <div className="page-shell">
@@ -482,83 +840,75 @@ function App() {
       <main className="app-layout">
         <section className="hero-card">
           <div className="hero-copy">
-            <div className="eyebrow">Netlify-ready inspection scoring form</div>
-            <h1>Shop inspection sheet built for fast audits.</h1>
+            <div className="eyebrow">Seoul Good</div>
+            <h1>巡店评分表</h1>
             <p className="hero-text">
-              Capture the inspector, store, and date, then score every rubric item in a layout that is
-              easy to extend and easy to read in Supabase.
+              先填写检查员、门店和日期，再按菜品、服务、卫生、厨房操作逐项打分。
             </p>
-            <div className="hero-badges">
-              <span className="badge badge-strong">Static hosting</span>
-              <span className={supabaseConfigured ? 'badge badge-success' : 'badge badge-warning'}>
-                {supabaseConfigured ? 'Supabase connected' : 'Supabase env missing'}
-              </span>
-              <span className="badge">Rubric version {rubricVersion}</span>
-            </div>
+            <p className="hero-weights">权重：菜品 70 分，服务 10 分，卫生 10 分，厨房操作 10 分。</p>
           </div>
 
           <div className="hero-metrics">
             <div className="metric-card">
-              <span className="metric-label">Score</span>
+              <span className="metric-label">综合评分</span>
               <strong>
                 {totalScore}/{maxScore}
               </strong>
               <span>{formatPercent(scorePercent)}</span>
             </div>
             <div className="metric-card">
-              <span className="metric-label">Progress</span>
+              <span className="metric-label">已完成</span>
               <strong>
                 {answeredCount}/{totalQuestions}
               </strong>
               <span>{formatPercent(completionPercent)}</span>
             </div>
             <div className="metric-card">
-              <span className="metric-label">Saved</span>
-              <strong>{lastSavedAt ?? 'Not yet'}</strong>
-              <span>Supabase row insert</span>
+              <span className="metric-label">保存状态</span>
+              <strong>{lastSavedAt ?? '未保存'}</strong>
+              <span>写入数据库</span>
             </div>
           </div>
         </section>
 
         <div className="content-grid">
           <form className="form-column" onSubmit={handleSubmit}>
-            <section className="panel">
+            <section className="panel panel-overflow-visible">
               <div className="panel-header">
                 <div>
-                  <h2>Inspection details</h2>
-                  <p>Capture the metadata for each store visit.</p>
+                  <h2>检查信息</h2>
+                  <p>填写本次巡店的基础信息。</p>
                 </div>
               </div>
 
               <div className="field-grid">
                 <label className="field">
-                  <span>Inspector</span>
+                  <span>检查员</span>
                   <input
                     type="text"
                     value={inspectorName}
                     onChange={(event) => setInspectorName(event.target.value)}
-                    placeholder="e.g. Anna Lee"
+                    placeholder="例如：李明"
                     autoComplete="name"
                     required
                   />
                 </label>
 
                 <label className="field">
-                  <span>Store</span>
-                  <input
-                    type="text"
+                  <span>门店</span>
+                  <StoreSearchSelect
                     value={storeName}
-                    onChange={(event) => setStoreName(event.target.value)}
-                    placeholder="e.g. Downtown Flagship"
-                    autoComplete="organization"
-                    required
+                    onChange={setStoreName}
+                    options={storeOptions}
+                    placeholder="请选择或搜索门店"
                   />
                 </label>
 
                 <label className="field field-wide">
-                  <span>Inspection date</span>
+                  <span>检查时间</span>
                   <input
-                    type="date"
+                    type="datetime-local"
+                    step={60}
                     value={inspectionDate}
                     onChange={(event) => setInspectionDate(event.target.value)}
                     required
@@ -577,9 +927,9 @@ function App() {
                       <h2>{section.title}</h2>
                       <p>{section.summary}</p>
                     </div>
-                    <span className="section-score-pill">
-                      {sectionSummaryItem?.sectionScore ?? 0}/{sectionSummaryItem?.sectionMaxScore ?? 0}
-                    </span>
+                    <div className="section-score-text">
+                      {sectionSummaryItem?.sectionScore ?? 0}/{sectionSummaryItem?.sectionMaxScore ?? 0} 分
+                    </div>
                   </div>
 
                   <div className="question-list">
@@ -604,18 +954,27 @@ function App() {
             <section className="panel">
               <div className="panel-header">
                 <div>
-                  <h2>Inspector notes</h2>
-                  <p>Optional comments that should travel with the submission row.</p>
+                  <h2>运营提升建议与门店反馈</h2>
+                  <p>这里填写不参与评分的补充意见。</p>
                 </div>
               </div>
 
               <div className="field-grid">
                 <label className="field field-wide">
-                  <span>Overall notes</span>
+                  <span>运营提升建议</span>
                   <textarea
-                    value={overallNotes}
-                    onChange={(event) => setOverallNotes(event.target.value)}
-                    placeholder="Highlight urgent fixes, strengths, or follow-up tasks..."
+                    value={operationSuggestions}
+                    onChange={(event) => setOperationSuggestions(event.target.value)}
+                    placeholder="例如：建议增加出餐前复核、优化高峰期备餐节奏。"
+                    rows={5}
+                  />
+                </label>
+                <label className="field field-wide">
+                  <span>门店反馈</span>
+                  <textarea
+                    value={storeFeedback}
+                    onChange={(event) => setStoreFeedback(event.target.value)}
+                    placeholder="例如：门店反馈晚高峰座位紧张，希望增加座位。"
                     rows={5}
                   />
                 </label>
@@ -635,23 +994,23 @@ function App() {
             >
               <strong>
                 {notice.tone === 'success'
-                  ? 'Saved'
+                  ? '已保存'
                   : notice.tone === 'error'
-                    ? 'Check before submitting'
+                    ? '提交前请检查'
                     : notice.tone === 'warning'
-                      ? 'Configuration needed'
-                      : 'Working draft'}
+                      ? '需要配置'
+                      : '草稿状态'}
               </strong>
               <span>{notice.message}</span>
             </div>
 
             <div className="form-actions">
               <button type="submit" className="submit-button" disabled={submitting}>
-                {submitting ? 'Saving...' : 'Save submission to Supabase'}
+                {submitting ? '正在保存...' : '保存到数据库'}
               </button>
               <div className="form-help">
-                <span>{missingQuestions.length} question(s) remaining</span>
-                <span>{allFieldsFilled ? 'Metadata complete' : 'Metadata incomplete'}</span>
+                <span>剩余 {missingQuestions.length} 项未评分</span>
+                <span>{allFieldsFilled ? '基础信息已填写' : '基础信息未填写完整'}</span>
               </div>
             </div>
           </form>
@@ -660,24 +1019,24 @@ function App() {
             <section className="panel summary-panel">
               <div className="panel-header">
                 <div>
-                  <h2>Live summary</h2>
-                  <p>A quick view of the current inspection status.</p>
+                  <h2>实时汇总</h2>
+                  <p>查看当前巡店的评分和完成情况。</p>
                 </div>
               </div>
 
               <div className="summary-metrics">
                 <div className="summary-chip">
-                  <span>Total score</span>
+                  <span>综合评分</span>
                   <strong>
                     {totalScore}/{maxScore}
                   </strong>
                 </div>
                 <div className="summary-chip">
-                  <span>Completion</span>
+                  <span>完成进度</span>
                   <strong>{formatPercent(completionPercent)}</strong>
                 </div>
                 <div className="summary-chip">
-                  <span>Answered items</span>
+                  <span>已答题目</span>
                   <strong>
                     {answeredCount}/{totalQuestions}
                   </strong>
@@ -690,8 +1049,8 @@ function App() {
                 </div>
                 <p>
                   {missingQuestions.length === 0
-                    ? 'All questions are scored and ready to save.'
-                    : 'Finish the remaining scores to unlock submission.'}
+                    ? '所有题目都已评分，可以直接保存。'
+                    : '请完成剩余评分后再保存。'}
                 </p>
               </div>
 
@@ -700,7 +1059,7 @@ function App() {
                   <div key={section.id} className="summary-row">
                     <div>
                       <strong>{section.title}</strong>
-                      <span>{sectionAnswered}/{section.questions.length} scored</span>
+                      <span>{sectionAnswered}/{section.questions.length} 项已评分</span>
                     </div>
                     <strong>
                       {sectionScore}/{sectionMaxScore}
@@ -713,42 +1072,22 @@ function App() {
             <section className="panel summary-panel">
               <div className="panel-header">
                 <div>
-                  <h2>Supabase table shape</h2>
-                  <p>The insertion payload keeps the row easy to inspect in the dashboard.</p>
+                  <h2>保存字段说明</h2>
+                  <p>保存时会自动写入检查信息、评分明细和两段文字反馈。</p>
                 </div>
               </div>
 
               <div className="preview-actions">
                 <button type="button" className="secondary-button" onClick={openCsvPreview}>
-                  Preview CSV
+                  CSV 预览
                 </button>
-                <button type="button" className="secondary-button" onClick={openPdfPreview}>
-                  Preview PDF
+                <button type="button" className="secondary-button" onClick={openPngPreview}>
+                  PNG 预览
                 </button>
               </div>
 
               <p className="summary-note">
-                The preview uses the current form state, so inspectors can verify the output before saving.
-              </p>
-
-              <div className="table-fields">
-                <span>inspection_date</span>
-                <span>inspector_name</span>
-                <span>store_name</span>
-                <span>total_score</span>
-                <span>max_score</span>
-                <span>score_percent</span>
-                <span>answered_count</span>
-                <span>total_questions</span>
-                <span>section_summary</span>
-                <span>answer_summary</span>
-                <span>overall_notes</span>
-                <span>answers</span>
-                <span>section_scores</span>
-              </div>
-
-              <p className="summary-note">
-                Update src/rubric.ts to add custom rubric items, then keep the same submission table.
+                预览会读取当前表单内容，方便在保存前检查导出效果。
               </p>
             </section>
           </aside>
@@ -760,23 +1099,23 @@ function App() {
           <div className="preview-modal" onClick={(event) => event.stopPropagation()}>
             <div className="preview-modal-header">
               <div>
-                <span className="preview-kicker">Direct online preview</span>
+                <span className="preview-kicker">即时在线预览</span>
                 <h2 id="preview-title">{previewTitle}</h2>
               </div>
               <button type="button" className="secondary-button" onClick={closePreview}>
-                Close
+                关闭
               </button>
             </div>
 
             {previewMode === 'csv' ? (
               <div className="csv-preview-panel">
-                <p className="preview-caption">Copy or inspect the CSV payload that would be stored for this submission.</p>
+                <p className="preview-caption">CSV 内容已生成，可直接复制或快速核对。</p>
                 <pre className="csv-preview">{previewContent}</pre>
               </div>
             ) : (
-              <div className="pdf-preview-panel">
-                <p className="preview-caption">This PDF is generated in the browser and rendered through the built-in viewer.</p>
-                <iframe className="pdf-preview-frame" src={previewUrl} title="PDF preview" />
+              <div className="png-preview-panel">
+                <p className="preview-caption">PNG 已在浏览器里生成并直接显示。</p>
+                <img className="png-preview-image" src={previewUrl} alt="PNG 预览" />
               </div>
             )}
           </div>

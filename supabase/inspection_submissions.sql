@@ -14,6 +14,8 @@ create table if not exists public.inspection_submissions (
   section_summary text not null default '',
   answer_summary text not null default '',
   overall_notes text,
+  operational_improvement_suggestions text,
+  store_feedback text,
   answers jsonb not null default '[]'::jsonb,
   section_scores jsonb not null default '[]'::jsonb
 );
