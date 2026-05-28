@@ -52,6 +52,46 @@ function toIsoDateTime(value: unknown): string {
   return Number.isNaN(parsed.getTime()) ? text : parsed.toISOString()
 }
 
+function toLocalDateTime(value: unknown): string {
+  const text = getString(value)
+
+  if (!text) {
+    return ''
+  }
+
+  if (text.includes('Z') || /[+-]\d{2}:?\d{2}$/.test(text)) {
+    const parsed = new Date(text)
+    if (!Number.isNaN(parsed.getTime())) {
+      const year = parsed.getFullYear()
+      const month = String(parsed.getMonth() + 1).padStart(2, '0')
+      const day = String(parsed.getDate()).padStart(2, '0')
+      const hours = String(parsed.getHours()).padStart(2, '0')
+      const minutes = String(parsed.getMinutes()).padStart(2, '0')
+      const seconds = String(parsed.getSeconds()).padStart(2, '0')
+
+      return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`
+    }
+  }
+
+  return text
+}
+
+function toJsonText(value: unknown): string {
+  if (value === null || value === undefined) {
+    return ''
+  }
+
+  if (typeof value === 'string') {
+    return value
+  }
+
+  try {
+    return JSON.stringify(value)
+  } catch {
+    return String(value)
+  }
+}
+
 function cleanFields(fields: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(
     Object.entries(fields).filter(([, value]) => value !== '' && value !== null && value !== undefined),
@@ -65,12 +105,19 @@ type SubmissionRecord = {
   inspection_date?: string
   created_at?: string
   submitted_at?: string
+  rubric_version?: string
   total_score?: number | string
+  max_score?: number | string
+  score_percent?: number | string
+  answered_count?: number | string
+  total_questions?: number | string
   section_summary?: string
   answer_summary?: string
   overall_notes?: string | null
   operational_improvement_suggestions?: string | null
   store_feedback?: string | null
+  answers?: unknown
+  section_scores?: unknown
   [key: string]: unknown
 }
 
@@ -155,15 +202,22 @@ function buildSharePointFields(record: SubmissionRecord) {
     Title: getString(record.store_name),
     store_name: getString(record.store_name),
     inspector_name: getString(record.inspector_name),
-    inspection_date: toIsoDateTime(record.inspection_date),
+    inspection_date: toLocalDateTime(record.inspection_date),
     created_at: toIsoDateTime(record.created_at),
     submitted_at: toIsoDateTime(record.submitted_at),
+    rubric_version: getString(record.rubric_version),
     total_score: getNumber(record.total_score),
+    max_score: getNumber(record.max_score),
+    score_percent: getNumber(record.score_percent),
+    answered_count: getNumber(record.answered_count),
+    total_questions: getNumber(record.total_questions),
     section_summary: getString(record.section_summary),
     answer_summary: getString(record.answer_summary),
     overall_notes: getString(record.overall_notes),
     operational_improvement_suggestions: getString(record.operational_improvement_suggestions),
     store_feedback: getString(record.store_feedback),
+    answers: toJsonText(record.answers),
+    section_scores: toJsonText(record.section_scores),
   })
 }
 
