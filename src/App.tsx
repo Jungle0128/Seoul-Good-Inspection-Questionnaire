@@ -280,10 +280,10 @@ async function buildPngBlob(
   },
 ) {
   const canvasScale = 2
-  const pageWidth = 794
+  const pageWidth = 680
   const canvasWidth = Math.round(pageWidth * canvasScale)
-  const marginX = 80
-  const marginY = 72
+  const marginX = 64
+  const marginY = 64
   const contentWidth = canvasWidth - marginX * 2
   const fontFamily = '"Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", "Source Han Sans SC", sans-serif'
 
@@ -483,6 +483,40 @@ async function buildPngBlob(
 
       resolve(blob)
     }, 'image/png')
+  })
+}
+
+function isBlobUrl(value: string) {
+  return value.startsWith('blob:')
+}
+
+function getPngFileName() {
+  const date = new Date()
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+
+  return `巡店评分汇总-${year}${month}${day}.png`
+}
+
+async function blobToDataUrl(blob: Blob): Promise<string> {
+  return await new Promise((resolve, reject) => {
+    const reader = new FileReader()
+
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        resolve(reader.result)
+        return
+      }
+
+      reject(new Error('无法生成 PNG 数据链接。'))
+    }
+
+    reader.onerror = () => {
+      reject(new Error('无法生成 PNG 数据链接。'))
+    }
+
+    reader.readAsDataURL(blob)
   })
 }
 
@@ -718,14 +752,14 @@ function App() {
 
   useEffect(() => {
     return () => {
-      if (previewUrl) {
+      if (previewUrl && isBlobUrl(previewUrl)) {
         URL.revokeObjectURL(previewUrl)
       }
     }
   }, [previewUrl])
 
   const closePreview = () => {
-    if (previewUrl) {
+    if (previewUrl && isBlobUrl(previewUrl)) {
       URL.revokeObjectURL(previewUrl)
     }
 
@@ -774,8 +808,8 @@ function App() {
         })),
       })
 
-      const url = URL.createObjectURL(blob)
-      if (previewUrl) {
+      const url = await blobToDataUrl(blob)
+      if (previewUrl && isBlobUrl(previewUrl)) {
         URL.revokeObjectURL(previewUrl)
       }
 
@@ -788,6 +822,28 @@ function App() {
         message: 'PNG preview could not be loaded. Try again or use the CSV preview.',
       })
     }
+  }
+
+  const openPngInNewTab = () => {
+    if (!previewUrl) {
+      return
+    }
+
+    window.open(previewUrl, '_blank', 'noopener,noreferrer')
+  }
+
+  const downloadPngPreview = () => {
+    if (!previewUrl) {
+      return
+    }
+
+    const link = document.createElement('a')
+    link.href = previewUrl
+    link.download = getPngFileName()
+    link.rel = 'noopener'
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
   }
 
   const setQuestionScore = (questionId: string, score: number | boolean | CheckboxAnswer) => {
@@ -1215,6 +1271,14 @@ function App() {
             ) : (
               <div className="png-preview-panel">
                 <p className="preview-caption">PNG 已在浏览器里生成并直接显示。</p>
+                <div className="png-preview-actions">
+                  <button type="button" className="secondary-button" onClick={openPngInNewTab} disabled={!previewUrl}>
+                    打开原图
+                  </button>
+                  <button type="button" className="secondary-button" onClick={downloadPngPreview} disabled={!previewUrl}>
+                    下载 PNG
+                  </button>
+                </div>
                 <img className="png-preview-image" src={previewUrl} alt="PNG 预览" />
               </div>
             )}

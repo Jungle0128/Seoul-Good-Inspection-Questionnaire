@@ -903,6 +903,12 @@ textarea:focus {
   white-space: pre-wrap;
 }
 
+.png-preview-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
 .png-preview-image {
   width: 100%;
   max-height: min(64vh, 760px);
@@ -970,6 +976,10 @@ textarea:focus {
   .summary-metrics,
   .summary-progress,
   .summary-list,
+
+  .png-preview-actions {
+    flex-direction: column;
+  }
   .table-fields,
   .summary-note {
     padding-left: 18px;
