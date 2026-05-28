@@ -576,6 +576,47 @@ textarea:focus {
   box-shadow: 0 14px 30px rgba(42, 67, 145, 0.24);
 }
 
+.checkbox-score-group {
+  display: grid;
+  gap: 10px;
+}
+
+.checkbox-score-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.94);
+  color: var(--text);
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    transform 160ms ease,
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    background 160ms ease;
+}
+
+.checkbox-score-option:hover {
+  transform: translateY(-1px);
+  border-color: rgba(42, 67, 145, 0.34);
+  box-shadow: 0 12px 26px rgba(17, 27, 43, 0.1);
+}
+
+.checkbox-score-option input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+  flex-shrink: 0;
+}
+
+.checkbox-score-option-active {
+  border-color: rgba(42, 67, 145, 0.32);
+  background: rgba(42, 67, 145, 0.08);
+}
+
 .notice {
   display: grid;
   gap: 6px;

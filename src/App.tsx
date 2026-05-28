@@ -2,7 +2,9 @@ import { type FormEvent, useEffect, useId, useMemo, useState } from 'react'
 import { submissionTable, supabase, supabaseConfigured } from './lib/supabase'
 import { rubricSections, rubricVersion, type RubricQuestion } from './rubric'
 
-type AnswerValue = number | boolean | null
+type CheckboxAnswer = Record<string, boolean>
+
+type AnswerValue = number | boolean | CheckboxAnswer | null
 
 type AnswerMap = Record<string, AnswerValue>
 
@@ -66,7 +68,63 @@ function isNormalBooleanQuestion(question: RubricQuestion) {
   return question.booleanScoring === 'normal'
 }
 
+function isCheckboxQuestion(question: RubricQuestion) {
+  return question.answerType === 'checkboxes'
+}
+
+function getCheckboxOptions(question: RubricQuestion): string[] {
+  return question.checkboxOptions ?? ['美观新鲜度', '出餐量', '按标准搭配']
+}
+
+function getInitialCheckboxAnswer(question: RubricQuestion): CheckboxAnswer {
+  return Object.fromEntries(getCheckboxOptions(question).map((option) => [option, false]))
+}
+
+function CheckboxGroup({
+  question,
+  value,
+  onChange,
+}: {
+  question: RubricQuestion
+  value: AnswerValue
+  onChange: (answer: CheckboxAnswer) => void
+}) {
+  const options = getCheckboxOptions(question)
+
+  const current = value && typeof value === 'object' && !Array.isArray(value) ? (value as CheckboxAnswer) : getInitialCheckboxAnswer(question)
+
+  return (
+    <div className="checkbox-score-group" role="group" aria-label={question.label}>
+      {options.map((optionLabel) => {
+        const checked = Boolean(current[optionLabel])
+
+        return (
+          <label
+            key={optionLabel}
+            className={checked ? 'checkbox-score-option checkbox-score-option-active' : 'checkbox-score-option'}
+          >
+            <input
+              type="checkbox"
+              checked={checked}
+              onChange={() => onChange({ ...current, [optionLabel]: !checked })}
+            />
+            <span>{optionLabel}</span>
+          </label>
+        )
+      })}
+    </div>
+  )
+}
+
 function getQuestionScore(question: RubricQuestion, answer: AnswerValue): number {
+  if (isCheckboxQuestion(question)) {
+    if (!answer || typeof answer !== 'object' || Array.isArray(answer)) {
+      return 0
+    }
+
+    return Object.values(answer).filter(Boolean).length
+  }
+
   if (isBooleanQuestion(question)) {
     if (isNormalBooleanQuestion(question)) {
       return answer === true ? question.maxScore : 0
@@ -79,6 +137,20 @@ function getQuestionScore(question: RubricQuestion, answer: AnswerValue): number
 }
 
 function formatQuestionAnswer(question: RubricQuestion, answer: AnswerValue): string {
+  if (isCheckboxQuestion(question)) {
+    if (!answer || typeof answer !== 'object' || Array.isArray(answer)) {
+      return `未选择（0/${question.maxScore}）`
+    }
+
+    const selectedLabels = getCheckboxOptions(question).filter((option) => answer[option])
+
+    if (selectedLabels.length === 0) {
+      return `未选择（0/${question.maxScore}）`
+    }
+
+    return `${selectedLabels.join('、')}（${selectedLabels.length}/${question.maxScore}）`
+  }
+
   if (isBooleanQuestion(question)) {
     const yesScore = isNormalBooleanQuestion(question) ? question.maxScore : 0
     const noScore = isNormalBooleanQuestion(question) ? 0 : question.maxScore
@@ -110,11 +182,12 @@ function buildSubmissionRows(params: {
   storeName: string
   inspectionDate: string
   answers: AnswerMap
+  labelOverrides?: Record<string, string>
 }) {
   const questionRows = rubricSections.flatMap((section) =>
     section.questions.map((question) => ({
       section_title: section.title,
-      question_label: question.label,
+      question_label: params.labelOverrides && params.labelOverrides[question.id] ? params.labelOverrides[question.id] : question.label,
       score: getQuestionScore(question, params.answers[question.id]),
       max_score: question.maxScore,
     })),
@@ -142,6 +215,7 @@ function buildCsvPreview(params: {
   operationSuggestions: string
   storeFeedback: string
   answers: AnswerMap
+  labelOverrides?: Record<string, string>
 }) {
   const { questionRows, sectionRows } = buildSubmissionRows(params)
   const headers = [
@@ -416,11 +490,23 @@ function ScoreButtons({
   question,
   value,
   onChange,
+  displayLabel,
 }: {
   question: RubricQuestion
   value: AnswerValue
-  onChange: (score: number | boolean) => void
+  onChange: (score: number | boolean | CheckboxAnswer) => void
+  displayLabel?: string
 }) {
+  if (isCheckboxQuestion(question)) {
+    return (
+      <CheckboxGroup
+        question={question}
+        value={value}
+        onChange={(answer) => onChange(answer)}
+      />
+    )
+  }
+
   if (isBooleanQuestion(question)) {
     const options = [
       { label: '否', value: false },
@@ -428,7 +514,7 @@ function ScoreButtons({
     ]
 
     return (
-      <div className="score-group" role="radiogroup" aria-label={question.label}>
+      <div className="score-group" role="radiogroup" aria-label={displayLabel ?? question.label}>
         {options.map((option) => {
           const active = value === option.value
 
@@ -451,7 +537,7 @@ function ScoreButtons({
   const options = Array.from({ length: question.maxScore + 1 }, (_, index) => index)
 
   return (
-    <div className="score-group" role="radiogroup" aria-label={question.label}>
+    <div className="score-group" role="radiogroup" aria-label={displayLabel ?? question.label}>
       {options.map((score) => {
         const active = value === score
 
@@ -580,6 +666,7 @@ function App() {
   const [operationSuggestions, setOperationSuggestions] = useState('')
   const [storeFeedback, setStoreFeedback] = useState('')
   const [answers, setAnswers] = useState<AnswerMap>(() => buildInitialAnswers())
+  const [labelOverrides, setLabelOverrides] = useState<Record<string, string>>(() => ({}))
   const [submitting, setSubmitting] = useState(false)
   const [previewMode, setPreviewMode] = useState<PreviewMode | null>(null)
   const [previewContent, setPreviewContent] = useState('')
@@ -655,6 +742,7 @@ function App() {
       operationSuggestions,
       storeFeedback,
       answers,
+      labelOverrides,
     })
 
     setPreviewContent(csv)
@@ -679,7 +767,7 @@ function App() {
           sectionMaxScore: section.sectionMaxScore,
           answeredCount: section.answeredCount,
           questions: section.section.questions.map((question) => ({
-            label: question.label,
+            label: labelOverrides[question.id] ?? question.label,
             score: getQuestionScore(question, answers[question.id]),
             maxScore: question.maxScore,
           })),
@@ -702,7 +790,7 @@ function App() {
     }
   }
 
-  const setQuestionScore = (questionId: string, score: number | boolean) => {
+  const setQuestionScore = (questionId: string, score: number | boolean | CheckboxAnswer) => {
     setAnswers((current) => ({
       ...current,
       [questionId]: score,
@@ -738,12 +826,14 @@ function App() {
       storeName,
       inspectionDate,
       answers,
+      labelOverrides,
     })
 
     const answerSummary = rubricSections
       .map((section) => {
         const sectionLines = section.questions.map((question) => {
-          return `- ${question.label}: ${formatQuestionAnswer(question, answers[question.id])}`
+          const label = labelOverrides[question.id] ?? question.label
+          return `- ${label}: ${formatQuestionAnswer(question, answers[question.id])}`
         })
 
         return [section.title, ...sectionLines].join('\n')
@@ -845,7 +935,7 @@ function App() {
             <p className="hero-text">
               先填写检查员、门店和日期，再按菜品、服务、卫生、厨房操作逐项打分。
             </p>
-            <p className="hero-weights">权重：菜品 70 分，服务 10 分，卫生 10 分，厨房操作 10 分。</p>
+            <p className="hero-weights">权重：热餐 46 分，沙拉 10 分，餐后类 3 分，前厅 10 分，后厨及仓库 10 分，服务 6 分，其他与反馈 6 分。</p>
           </div>
 
           <div className="hero-metrics">
@@ -936,13 +1026,23 @@ function App() {
                     {section.questions.map((question) => (
                       <article key={question.id} className="question-card">
                         <div className="question-copy">
-                          <h3>{question.label}</h3>
+                          {(question.id === 'hot_16') ? (
+                            <input
+                              type="text"
+                              value={labelOverrides[question.id] ?? question.label}
+                              onChange={(e) => setLabelOverrides((cur) => ({ ...cur, [question.id]: e.target.value }))}
+                              placeholder="请输入新品名称"
+                            />
+                          ) : (
+                            <h3>{labelOverrides[question.id] ?? question.label}</h3>
+                          )}
                           <p>{question.description}</p>
                         </div>
                         <ScoreButtons
                           question={question}
                           value={answers[question.id]}
                           onChange={(score) => setQuestionScore(question.id, score)}
+                          displayLabel={labelOverrides[question.id] ?? question.label}
                         />
                       </article>
                     ))}
@@ -999,7 +1099,7 @@ function App() {
                     ? '提交前请检查'
                     : notice.tone === 'warning'
                       ? '需要配置'
-                      : '草稿状态'}
+                      : '修改提示'}
               </strong>
               <span>{notice.message}</span>
             </div>
