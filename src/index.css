@@ -302,12 +302,50 @@ p {
   position: relative;
   border: 1px solid var(--border);
   border-radius: var(--radius-xl);
-  background:
-    linear-gradient(90deg, var(--accent), var(--accent-strong), var(--warning)) 0 0 / 100% 5px no-repeat,
-    var(--bg-elevated);
+  background: var(--bg-elevated);
   backdrop-filter: blur(18px);
   box-shadow: var(--shadow);
   overflow: hidden;
+}
+
+.section-divider {
+  position: relative;
+  z-index: 2;
+  height: 14px;
+  margin: 14px 22px;
+  border-radius: 999px;
+  overflow: hidden;
+  pointer-events: none;
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(10px);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.16),
+    0 8px 18px rgba(17, 27, 43, 0.06);
+}
+
+.section-divider::before,
+.section-divider::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent), var(--accent-strong), var(--warning));
+}
+
+.section-divider::before {
+  inset: -8px -2px;
+  filter: blur(12px);
+  opacity: 0.26;
+}
+
+.section-divider::after {
+  top: 6px;
+  bottom: 6px;
+  left: 14px;
+  right: 14px;
+  height: 2px;
+  opacity: 0.98;
+  box-shadow: 0 0 10px rgba(255, 255, 255, 0.26);
 }
 
 .panel-overflow-visible {
@@ -973,6 +1011,11 @@ textarea:focus {
   .field-grid,
   .panel-header,
   .question-list,
+
+  .section-divider {
+    margin-left: 10px;
+    margin-right: 10px;
+  }
   .summary-metrics,
   .summary-progress,
   .summary-list,

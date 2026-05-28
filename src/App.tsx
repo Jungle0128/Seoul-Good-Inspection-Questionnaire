@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useId, useMemo, useState } from 'react'
+import { Fragment, type FormEvent, useEffect, useId, useMemo, useState } from 'react'
 import { submissionTable, supabase, supabaseConfigured } from './lib/supabase'
 import { rubricSections, rubricVersion, type RubricQuestion } from './rubric'
 
@@ -1063,47 +1063,55 @@ function App() {
               </div>
             </section>
 
-            {rubricSections.map((section) => {
+            {rubricSections.map((section, index) => {
               const sectionSummaryItem = sectionStats.find((item) => item.section.id === section.id)
 
               return (
-                <section key={section.id} className="panel section-panel">
-                  <div className="panel-header">
-                    <div>
-                      <h2>{section.title}</h2>
-                      <p>{section.summary}</p>
+                <Fragment key={section.id}>
+                  {index > 0 && (
+                    <div className="section-divider" aria-hidden="true">
+                      <span />
                     </div>
-                    <div className="section-score-text">
-                      {sectionSummaryItem?.sectionScore ?? 0}/{sectionSummaryItem?.sectionMaxScore ?? 0} 分
-                    </div>
-                  </div>
+                  )}
 
-                  <div className="question-list">
-                    {section.questions.map((question) => (
-                      <article key={question.id} className="question-card">
-                        <div className="question-copy">
-                          {(question.id === 'hot_16') ? (
-                            <input
-                              type="text"
-                              value={labelOverrides[question.id] ?? question.label}
-                              onChange={(e) => setLabelOverrides((cur) => ({ ...cur, [question.id]: e.target.value }))}
-                              placeholder="请输入新品名称"
-                            />
-                          ) : (
-                            <h3>{labelOverrides[question.id] ?? question.label}</h3>
-                          )}
-                          <p>{question.description}</p>
-                        </div>
-                        <ScoreButtons
-                          question={question}
-                          value={answers[question.id]}
-                          onChange={(score) => setQuestionScore(question.id, score)}
-                          displayLabel={labelOverrides[question.id] ?? question.label}
-                        />
-                      </article>
-                    ))}
-                  </div>
-                </section>
+                  <section className="panel section-panel">
+                    <div className="panel-header">
+                      <div>
+                        <h2>{section.title}</h2>
+                        <p>{section.summary}</p>
+                      </div>
+                      <div className="section-score-text">
+                        {sectionSummaryItem?.sectionScore ?? 0}/{sectionSummaryItem?.sectionMaxScore ?? 0} 分
+                      </div>
+                    </div>
+
+                    <div className="question-list">
+                      {section.questions.map((question) => (
+                        <article key={question.id} className="question-card">
+                          <div className="question-copy">
+                            {(question.id === 'hot_16') ? (
+                              <input
+                                type="text"
+                                value={labelOverrides[question.id] ?? question.label}
+                                onChange={(e) => setLabelOverrides((cur) => ({ ...cur, [question.id]: e.target.value }))}
+                                placeholder="请输入新品名称"
+                              />
+                            ) : (
+                              <h3>{labelOverrides[question.id] ?? question.label}</h3>
+                            )}
+                            <p>{question.description}</p>
+                          </div>
+                          <ScoreButtons
+                            question={question}
+                            value={answers[question.id]}
+                            onChange={(score) => setQuestionScore(question.id, score)}
+                            displayLabel={labelOverrides[question.id] ?? question.label}
+                          />
+                        </article>
+                      ))}
+                    </div>
+                  </section>
+                </Fragment>
               )
             })}
 
