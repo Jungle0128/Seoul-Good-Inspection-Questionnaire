@@ -21,6 +21,18 @@ const hotDishCheckboxOptions = ['美观新鲜度', '出餐量', '按标准搭配
 
 export const rubricSections: RubricSection[] = [
   {
+    id: 'overall',
+    title: '餐食总项',
+    questions: [
+      {
+        id: 'overall_impression',
+        label: '整体餐台效果',
+        maxScore: 10,
+        answerType: 'score'
+      }
+    ]
+  },
+  {
     id: 'hot_dishes',
     title: '热餐',
     summary: '出餐标准得3分，出餐美观得2分，出餐合格得1分，不合格得0分（共 45 分）',
