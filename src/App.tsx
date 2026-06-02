@@ -991,7 +991,7 @@ function App() {
             <p className="hero-text">
               先填写检查员、门店和日期，再按菜品、服务、卫生、厨房操作逐项打分。
             </p>
-            <p className="hero-weights">权重：热餐 48 分，沙拉 10 分，餐后类 3 分，前厅 10 分，后厨及仓库 10 分，服务 6 分，其他与反馈 6 分。</p>
+            <p className="hero-weights">权重：热餐 48 分，沙拉 10 分，餐后类 2 分，前厅 10 分，后厨及仓库 10 分，服务 5 分，其他与反馈 6 分。</p>
           </div>
 
           <div className="hero-metrics">

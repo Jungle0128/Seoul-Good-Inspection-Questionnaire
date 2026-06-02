@@ -203,18 +203,12 @@ export const rubricSections: RubricSection[] = [
   {
     id: 'after_meal',
     title: '餐后类',
-    summary: '餐后饮品与甜品（共 3 分）',
+    summary: '餐后饮品与甜品（共 2 分）',
     questions: [
       {
-        id: 'coffee',
-        label: '咖啡',
-        description: '新鲜，颜色适中，不空壶',
-        maxScore: 1
-      },
-      {
-        id: 'tea',
-        label: '茶',
-        description: '新鲜，颜色适中，不空壶',
+        id: 'coffee_tea',
+        label: '咖啡和茶',
+        description: '咖啡和茶均需新鲜，颜色适中，不空壶',
         maxScore: 1
       },
       {
@@ -306,7 +300,7 @@ export const rubricSections: RubricSection[] = [
   {
     id: 'service',
     title: '服务',
-    summary: '服务态度与着装（共 6 分）',
+    summary: '服务态度与着装（共 5 分）',
     questions: [
       {
         id: 'queue_and_collection',
@@ -316,7 +310,7 @@ export const rubricSections: RubricSection[] = [
       },
       { id: 'kassa_use', label: '服务人员 Kassa 使用熟练、语言流利', description: '服务人员使用收银系统熟练，语言表达流利', maxScore: 1 },
       { id: 'dress_code', label: '工作时着工装、仪表整洁', description: '工作时着工装且干净整洁，不戴耳机或玩手机', maxScore: 1 },
-      { id: 'service_attitude', label: '服务礼貌、主动介绍与微笑', description: '服务人员态度热情礼貌，面带微笑，进离店打招呼，主动介绍', maxScore: 2 },
+      { id: 'service_attitude', label: '服务礼貌、主动介绍与微笑', description: '服务人员态度热情礼貌，面带微笑，进离店打招呼，主动介绍', maxScore: 1 },
     ],
   },
   {
