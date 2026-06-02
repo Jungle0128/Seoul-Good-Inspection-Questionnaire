@@ -709,7 +709,7 @@ function App() {
     supabaseConfigured
       ? {
           tone: 'info',
-          message: '修改 src/rubric.ts 就能增删评分项，不需要改页面结构。',
+          message: '',
         }
       : {
           tone: 'warning',
@@ -991,7 +991,7 @@ function App() {
             <p className="hero-text">
               先填写检查员、门店和日期，再按菜品、服务、卫生、厨房操作逐项打分。
             </p>
-            <p className="hero-weights">权重：热餐 46 分，沙拉 10 分，餐后类 3 分，前厅 10 分，后厨及仓库 10 分，服务 6 分，其他与反馈 6 分。</p>
+            <p className="hero-weights">权重：热餐 48 分，沙拉 10 分，餐后类 3 分，前厅 10 分，后厨及仓库 10 分，服务 6 分，其他与反馈 6 分。</p>
           </div>
 
           <div className="hero-metrics">
@@ -1145,28 +1145,30 @@ function App() {
               </div>
             </section>
 
-            <div
-              className={
-                notice.tone === 'error'
-                  ? 'notice notice-error'
-                  : notice.tone === 'success'
-                    ? 'notice notice-success'
-                    : notice.tone === 'warning'
-                      ? 'notice notice-warning'
-                      : 'notice notice-info'
-              }
-            >
-              <strong>
-                {notice.tone === 'success'
-                  ? '已保存'
-                  : notice.tone === 'error'
-                    ? '提交前请检查'
-                    : notice.tone === 'warning'
-                      ? '需要配置'
-                      : '修改提示'}
-              </strong>
-              <span>{notice.message}</span>
-            </div>
+            {notice.message ? (
+              <div
+                className={
+                  notice.tone === 'error'
+                    ? 'notice notice-error'
+                    : notice.tone === 'success'
+                      ? 'notice notice-success'
+                      : notice.tone === 'warning'
+                        ? 'notice notice-warning'
+                        : 'notice notice-info'
+                }
+              >
+                <strong>
+                  {notice.tone === 'success'
+                    ? '已保存'
+                    : notice.tone === 'error'
+                      ? '提交前请检查'
+                      : notice.tone === 'warning'
+                        ? '需要配置'
+                        : '状态'}
+                </strong>
+                <span>{notice.message}</span>
+              </div>
+            ) : null}
 
             <div className="form-actions">
               <button type="submit" className="submit-button" disabled={submitting}>

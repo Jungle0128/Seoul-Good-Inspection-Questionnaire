@@ -15,9 +15,7 @@ export type RubricSection = {
   questions: RubricQuestion[]
 }
 
-export const rubricVersion = '巡店评分表-v6'
-
-const hotDishCheckboxOptions = ['美观新鲜度', '出餐量', '按标准搭配']
+export const rubricVersion = '巡店评分表-v7'
 
 export const rubricSections: RubricSection[] = [
   {
@@ -35,135 +33,103 @@ export const rubricSections: RubricSection[] = [
   {
     id: 'hot_dishes',
     title: '热餐',
-    summary: '出餐标准得3分，出餐美观得2分，出餐合格得1分，不合格得0分（共 45 分）',
+    summary: '评判标准统一为 0、1、2、3 分。',
     questions: [
       {
         id: 'hot_1',
         label: '辣蛋黄鸡腿肉',
         description: '鸡块呈浅金黄色，奶酱匀匀覆盖；鸡块分明，外观完整',
         maxScore: 3,
-        answerType: 'checkboxes',
-        checkboxOptions: hotDishCheckboxOptions,
       },
       {
         id: 'hot_2',
         label: '是拉差奶油鸡排',
         description: '颜色均匀金黄，酱汁颜色有层次；外观完整不脱皮；鸡肉多汁有咬感',
         maxScore: 3,
-        answerType: 'checkboxes',
-        checkboxOptions: hotDishCheckboxOptions,
       },
       {
         id: 'hot_3',
         label: '黑椒柠檬鸡腿',
         description: '鸡块呈浅金黄色，奶酱均匀覆盖；鸡块分明，外壳完整',
         maxScore: 3,
-        answerType: 'checkboxes',
-        checkboxOptions: hotDishCheckboxOptions,
       },
       {
         id: 'hot_4',
         label: '水牛城辣翅',
         description: '鸡翅鸡翅呈棕金色，表面酱汁浓郁发亮；鸡翅外皮完整有虎皮纹路',
         maxScore: 3,
-        answerType: 'checkboxes',
-        checkboxOptions: hotDishCheckboxOptions,
       },
       {
         id: 'hot_5',
         label: '原味脆皮鸡翅',
         description: '金黄色，表面干爽，麟片状炸皮明显；外皮完整，不脱皮，入口酥脆，鸡肉多汁',
         maxScore: 3,
-        answerType: 'checkboxes',
-        checkboxOptions: hotDishCheckboxOptions,
       },
       {
         id: 'hot_6',
         label: '左宗棠鸡',
         description: '鸡块红亮油润，无酱汁沉底；鸡块不粘黏，酱汁包裹均匀；外脆里酥不油腻',
         maxScore: 3,
-        answerType: 'checkboxes',
-        checkboxOptions: hotDishCheckboxOptions,
       },
       {
         id: 'hot_7',
         label: '日式酱油鸡翅',
         description: '鸡翅呈深棕琥珀色，表面油亮发光；鸡翅外皮完整有虎皮纹路',
         maxScore: 3,
-        answerType: 'checkboxes',
-        checkboxOptions: hotDishCheckboxOptions,
       },
       {
         id: 'hot_8',
         label: '薯网',
         description: '颜色金黄，不粘黏',
         maxScore: 3,
-        answerType: 'checkboxes',
-        checkboxOptions: hotDishCheckboxOptions,
       },
       {
         id: 'hot_9',
         label: '饺子和炸虾',
         description: '配比均匀，颜色合格',
         maxScore: 3,
-        answerType: 'checkboxes',
-        checkboxOptions: hotDishCheckboxOptions,
       },
       {
         id: 'hot_10',
         label: '辣炒牛肉',
         description: '颜色合格，牛肉和配菜配比合理，菜品新鲜',
         maxScore: 3,
-        answerType: 'checkboxes',
-        checkboxOptions: hotDishCheckboxOptions,
       },
       {
         id: 'hot_11',
         label: '叉烧',
         description: '颜色红棕偏琥珀色，表面有均匀亮油，边缘有轻微焦化；肉块大小均匀（2-3cm）；盘底酱汁少、不积水；肉有弹性不柴',
-        maxScore: 1,
-        answerType: 'checkboxes',
-        checkboxOptions: hotDishCheckboxOptions,
+        maxScore: 3,
       },
       {
         id: 'hot_12',
         label: '腰果鸡',
         description: '鸡肉呈浅棕油亮色；鸡肉占主体，腰果均匀分布，蔬菜作为辅助层次；酱汁薄薄包裹，不积汁',
         maxScore: 3,
-        answerType: 'checkboxes',
-        checkboxOptions: hotDishCheckboxOptions,
       },
       {
         id: 'hot_13',
         label: '炒蔬菜',
         description: '蔬菜颜色明亮新鲜；形状完整，大小均匀；脆爽感明显，清爽不油腻',
         maxScore: 3,
-        answerType: 'checkboxes',
-        checkboxOptions: hotDishCheckboxOptions,
       },
       {
         id: 'hot_14',
         label: '炒饭',
         description: '米饭呈均匀棕色，有自然油亮感，米粒分明，鸡蛋均匀分布，配菜比例均衡，炒饭有蓬松感，香菜鲜绿',
         maxScore: 3,
-        answerType: 'checkboxes',
-        checkboxOptions: hotDishCheckboxOptions,
       },
       {
         id: 'hot_15',
         label: '炒粉',
         description: '米粉呈深棕琥珀色，表面油亮但不积油，米粉根根分明，配菜颜色丰富鲜亮，鸡蛋均匀分布，芝麻均匀撒落，香菜立体蓬松',
         maxScore: 3,
-        answerType: 'checkboxes',
-        checkboxOptions: hotDishCheckboxOptions,
       },
       {
         id: 'hot_16',
         label: ' ',
         description: '以每月新品小组内的讨论为标准',
         maxScore: 3,
-        answerType: 'checkboxes',
-        checkboxOptions: hotDishCheckboxOptions,
       },
     ],
   },
