@@ -1,4 +1,5 @@
 import { Fragment, type FormEvent, useEffect, useId, useMemo, useState } from 'react'
+import { jsPDF } from 'jspdf'
 import { submissionTable, supabase, supabaseConfigured } from './lib/supabase'
 import { rubricSections, rubricVersion, type RubricQuestion } from './rubric'
 
@@ -15,7 +16,7 @@ type Notice = {
   message: string
 }
 
-type PreviewMode = 'csv' | 'png'
+type PreviewMode = 'png' | 'pdf'
 
 const storeOptions = [
   'SG Lippulaiva',
@@ -38,6 +39,7 @@ const storeOptions = [
   'SG Kluuvi',
   'SG Ideapark Oulu',
   'SG Puuvilla Pori',
+  'SG Kamppi',
 ] as const
 
 function getCurrentLocalDateTimeValue() {
@@ -173,16 +175,13 @@ function formatQuestionAnswer(question: RubricQuestion, answer: AnswerValue): st
   return `未评分（0/${question.maxScore}）`
 }
 
-function escapeCsvValue(value: string): string {
-  return `"${value.replace(/"/g, '""')}"`
-}
-
 function buildSubmissionRows(params: {
   inspectorName: string
   storeName: string
   inspectionDate: string
   answers: AnswerMap
   labelOverrides?: Record<string, string>
+  questionNotes?: Record<string, string>
 }) {
   const questionRows = rubricSections.flatMap((section) =>
     section.questions.map((question) => ({
@@ -190,6 +189,7 @@ function buildSubmissionRows(params: {
       question_label: params.labelOverrides && params.labelOverrides[question.id] ? params.labelOverrides[question.id] : question.label,
       score: getQuestionScore(question, params.answers[question.id]),
       max_score: question.maxScore,
+      note: params.questionNotes?.[question.id]?.trim() ?? '',
     })),
   )
 
@@ -208,98 +208,60 @@ function buildSubmissionRows(params: {
   return { questionRows, sectionRows }
 }
 
-function buildCsvPreview(params: {
+type SummaryRenderParams = {
   inspectorName: string
   storeName: string
   inspectionDate: string
+  totalScore: number
+  maxScore: number
+  scorePercent: number
+  completionPercent: number
   operationSuggestions: string
   storeFeedback: string
-  answers: AnswerMap
-  labelOverrides?: Record<string, string>
-}) {
-  const { questionRows, sectionRows } = buildSubmissionRows(params)
-  const headers = [
-    '检查日期',
-    '检查员',
-    '门店',
-    '评分板块',
-    '题目',
-    '得分',
-    '满分',
-    '运营提升建议',
-    '门店反馈',
-  ]
-
-  const lines = [
-    headers.map(escapeCsvValue).join(','),
-    ...questionRows.map((row) =>
-      [
-        params.inspectionDate,
-        params.inspectorName,
-        params.storeName,
-        row.section_title,
-        row.question_label,
-        String(row.score),
-        String(row.max_score),
-        params.operationSuggestions || '',
-        params.storeFeedback || '',
-      ]
-        .map(escapeCsvValue)
-        .join(','),
-    ),
-    '',
-    '板块汇总,得分,满分,已答题数',
-    ...sectionRows.map((row) =>
-      [row.section_title, String(row.score), String(row.max_score), String(row.answered_count)]
-        .map(escapeCsvValue)
-        .join(','),
-    ),
-  ]
-
-  return lines.join('\n')
+  sectionStats: Array<{
+    title: string
+    sectionScore: number
+    sectionMaxScore: number
+    answeredCount: number
+    questions: Array<{ label: string; score: number; maxScore: number; note?: string }>
+  }>
 }
 
-async function buildPngBlob(
-  params: {
-    inspectorName: string
-    storeName: string
-    inspectionDate: string
-    totalScore: number
-    maxScore: number
-    scorePercent: number
-    completionPercent: number
-    operationSuggestions: string
-    storeFeedback: string
-    sectionStats: Array<{
-      title: string
-      sectionScore: number
-      sectionMaxScore: number
-      answeredCount: number
-      questions: Array<{ label: string; score: number; maxScore: number }>
-    }>
-  },
-) {
-  const canvasScale = 2
-  const pageWidth = 680
-  const canvasWidth = Math.round(pageWidth * canvasScale)
-  const marginX = 64
-  const marginY = 64
-  const contentWidth = canvasWidth - marginX * 2
+function buildSummaryCanvas(params: SummaryRenderParams): HTMLCanvasElement {
+  const width = 1500
+  const padX = 76
+  const padTop = 76
+  const padBottom = 72
+  const contentW = width - padX * 2
   const fontFamily = '"Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", "Source Han Sans SC", sans-serif'
 
+  const accent = '#0f766e'
+  const accentSoft = '#cdeee7'
+  const ink = '#0f172a'
+  const inkSoft = '#475569'
+  const muted = '#94a3b8'
+  const divider = '#e5e7eb'
+
   const measureCanvas = document.createElement('canvas')
-  measureCanvas.width = canvasWidth
+  measureCanvas.width = width
   measureCanvas.height = 1
   const measureContext = measureCanvas.getContext('2d')
 
   if (!measureContext) {
-    throw new Error('无法创建 PNG 渲染画布。')
+    throw new Error('无法创建渲染画布。')
   }
 
   measureContext.textBaseline = 'top'
 
-  const wrapText = (text: string, fontSize: number, fontWeight: number, maxWidth: number) => {
-    measureContext.font = `${fontWeight} ${fontSize}px ${fontFamily}`
+  const fontString = (size: number, weight: number) => `${weight} ${size}px ${fontFamily}`
+
+  const measureWidth = (text: string, size: number, weight: number) => {
+    measureContext.font = fontString(size, weight)
+    return measureContext.measureText(text).width
+  }
+
+  const wrap = (text: string, size: number, weight: number, maxWidth: number) => {
+    measureContext.font = fontString(size, weight)
     const lines: string[] = []
 
     text.split('\n').forEach((paragraph) => {
@@ -328,151 +290,270 @@ async function buildPngBlob(
     return lines.length > 0 ? lines : ['']
   }
 
-  type RenderBlock = {
-    text: string
-    fontSize: number
-    fontWeight: number
-    indent: number
-    lineHeight: number
-    gapAfter: number
-    color?: string
-  }
+  type Primitive =
+    | { kind: 'rect'; x: number; y: number; w: number; h: number; radius: number; fill: string }
+    | { kind: 'text'; x: number; y: number; text: string; size: number; weight: number; color: string }
+    | { kind: 'line'; x: number; y: number; w: number; color: string; thickness: number }
 
-  const blocks: RenderBlock[] = [
-    {
-      text: '巡店评分汇总',
-      fontSize: 40,
-      fontWeight: 700,
-      indent: 0,
-      lineHeight: 54,
-      gapAfter: 18,
-      color: '#111827',
-    },
-    { text: `检查员：${params.inspectorName}`, fontSize: 23, fontWeight: 400, indent: 0, lineHeight: 34, gapAfter: 6 },
-    { text: `门店：${params.storeName}`, fontSize: 23, fontWeight: 400, indent: 0, lineHeight: 34, gapAfter: 6 },
-    { text: `检查日期：${params.inspectionDate}`, fontSize: 23, fontWeight: 400, indent: 0, lineHeight: 34, gapAfter: 16 },
-    {
-      text: `综合评分：${params.totalScore}/${params.maxScore}（${formatPercent(params.scorePercent)}）`,
-      fontSize: 28,
-      fontWeight: 700,
-      indent: 0,
-      lineHeight: 40,
-      gapAfter: 8,
-    },
-    {
-      text: `完成进度：${formatPercent(params.completionPercent)}`,
-      fontSize: 23,
-      fontWeight: 400,
-      indent: 0,
-      lineHeight: 34,
-      gapAfter: 18,
-    },
-  ]
+  const primitives: Primitive[] = []
+  let y = padTop
 
-  params.sectionStats.forEach((section) => {
-    blocks.push(
-      {
-        text: section.title,
-        fontSize: 30,
-        fontWeight: 700,
-        indent: 0,
-        lineHeight: 42,
-        gapAfter: 8,
-        color: '#0f766e',
-      },
-      {
-        text: `${section.sectionScore}/${section.sectionMaxScore} 总分｜${section.answeredCount}/${section.questions.length} 已答`,
-        fontSize: 20,
-        fontWeight: 400,
-        indent: 0,
-        lineHeight: 30,
-        gapAfter: 12,
-        color: '#374151',
-      },
-    )
+  const drawParagraph = (
+    text: string,
+    options: { size: number; weight?: number; color?: string; maxWidth?: number; lineHeight?: number; gapAfter?: number },
+  ) => {
+    const weight = options.weight ?? 400
+    const color = options.color ?? ink
+    const maxWidth = options.maxWidth ?? contentW
+    const lineHeight = options.lineHeight ?? options.size * 1.5
+    const lines = wrap(text, options.size, weight, maxWidth)
 
-    section.questions.forEach((question) => {
-      blocks.push({
-        text: `${question.label}: ${question.score}/${question.maxScore}`,
-        fontSize: 20,
-        fontWeight: 400,
-        indent: 24,
-        lineHeight: 30,
-        gapAfter: 8,
-        color: '#111827',
-      })
+    lines.forEach((line) => {
+      primitives.push({ kind: 'text', x: padX, y, text: line, size: options.size, weight, color })
+      y += lineHeight
     })
 
-    blocks.push({ text: '', fontSize: 1, fontWeight: 400, indent: 0, lineHeight: 12, gapAfter: 8 })
+    y += options.gapAfter ?? 0
+  }
+
+  const bandHeight = 74
+
+  const drawSectionBand = (title: string, rightText?: string) => {
+    primitives.push({ kind: 'rect', x: padX, y, w: contentW, h: bandHeight, radius: 20, fill: accent })
+    primitives.push({ kind: 'text', x: padX + 32, y: y + (bandHeight - 34) / 2, text: title, size: 34, weight: 700, color: '#ffffff' })
+
+    if (rightText) {
+      primitives.push({
+        kind: 'text',
+        x: padX + contentW - 32 - measureWidth(rightText, 26, 600),
+        y: y + (bandHeight - 26) / 2,
+        text: rightText,
+        size: 26,
+        weight: 600,
+        color: accentSoft,
+      })
+    }
+
+    y += bandHeight + 16
+  }
+
+  // ---- Header ----
+  const eyebrowText = 'SEOUL GOOD · 巡店报告'
+  const eyebrowSize = 24
+  const eyebrowHeight = 50
+  const eyebrowWidth = measureWidth(eyebrowText, eyebrowSize, 700) + 48
+  primitives.push({ kind: 'rect', x: padX, y, w: eyebrowWidth, h: eyebrowHeight, radius: eyebrowHeight / 2, fill: accent })
+  primitives.push({
+    kind: 'text',
+    x: padX + 24,
+    y: y + (eyebrowHeight - eyebrowSize) / 2 - 1,
+    text: eyebrowText,
+    size: eyebrowSize,
+    weight: 700,
+    color: '#ffffff',
+  })
+  y += eyebrowHeight + 26
+
+  drawParagraph('巡店评分汇总', { size: 62, weight: 800, color: ink, lineHeight: 74, gapAfter: 14 })
+  drawParagraph(
+    `门店：${params.storeName}　｜　检查员：${params.inspectorName}　｜　检查日期：${params.inspectionDate}`,
+    { size: 28, weight: 500, color: inkSoft, lineHeight: 44, gapAfter: 34 },
+  )
+
+  // ---- Summary cards ----
+  const totalAnswered = params.sectionStats.reduce((sum, section) => sum + section.answeredCount, 0)
+  const totalQuestionCount = params.sectionStats.reduce((sum, section) => sum + section.questions.length, 0)
+
+  const cards = [
+    { label: '综合评分', value: `${params.totalScore}/${params.maxScore}`, sub: formatPercent(params.scorePercent) },
+    { label: '完成进度', value: formatPercent(params.completionPercent), sub: `${totalAnswered}/${totalQuestionCount} 题已答` },
+    { label: '已答题目', value: `${totalAnswered}/${totalQuestionCount}`, sub: `共 ${params.sectionStats.length} 个板块` },
+  ]
+
+  const cardGap = 26
+  const cardWidth = (contentW - cardGap * 2) / 3
+  const cardHeight = 168
+  const cardTop = y
+
+  cards.forEach((card, index) => {
+    const cardX = padX + index * (cardWidth + cardGap)
+    primitives.push({ kind: 'rect', x: cardX, y: cardTop, w: cardWidth, h: cardHeight, radius: 26, fill: '#f1f5f9' })
+    primitives.push({ kind: 'text', x: cardX + 34, y: cardTop + 30, text: card.label, size: 26, weight: 600, color: '#64748b' })
+    primitives.push({ kind: 'text', x: cardX + 34, y: cardTop + 72, text: card.value, size: 48, weight: 800, color: ink })
+    primitives.push({ kind: 'text', x: cardX + 34, y: cardTop + 132, text: card.sub, size: 24, weight: 600, color: accent })
   })
 
-  if (params.operationSuggestions.trim()) {
-    blocks.push(
-      { text: '运营提升建议', fontSize: 30, fontWeight: 700, indent: 0, lineHeight: 42, gapAfter: 10, color: '#0f766e' },
-      {
-        text: params.operationSuggestions.trim(),
-        fontSize: 20,
-        fontWeight: 400,
-        indent: 0,
-        lineHeight: 30,
-        gapAfter: 16,
-        color: '#111827',
-      },
+  y = cardTop + cardHeight + 48
+
+  // ---- Sections ----
+  const rowPadX = 30
+
+  params.sectionStats.forEach((section) => {
+    drawSectionBand(
+      section.title,
+      `${section.sectionScore}/${section.sectionMaxScore} 分 · ${section.answeredCount}/${section.questions.length} 已答`,
     )
+
+    const labelSize = 29
+    const scoreSize = 29
+    const noteSize = 25
+    const labelLineHeight = labelSize * 1.4
+    const noteLineHeight = noteSize * 1.4
+    const scoreColumnWidth = 150
+    const labelMaxWidth = contentW - rowPadX * 2 - scoreColumnWidth
+
+    section.questions.forEach((question, questionIndex) => {
+      const labelLines = wrap(question.label.trim() || '（未命名）', labelSize, 500, labelMaxWidth)
+      const trimmedNote = question.note?.trim()
+      const noteLines = trimmedNote ? wrap(`备注：${trimmedNote}`, noteSize, 400, contentW - rowPadX * 2) : []
+
+      const rowPadY = 18
+      const rowContentHeight =
+        labelLines.length * labelLineHeight + (noteLines.length > 0 ? 8 + noteLines.length * noteLineHeight : 0)
+      const rowHeight = rowPadY * 2 + rowContentHeight
+
+      if (questionIndex % 2 === 1) {
+        primitives.push({ kind: 'rect', x: padX, y, w: contentW, h: rowHeight, radius: 14, fill: '#f8fafc' })
+      }
+
+      let textY = y + rowPadY
+      labelLines.forEach((line) => {
+        primitives.push({ kind: 'text', x: padX + rowPadX, y: textY, text: line, size: labelSize, weight: 500, color: '#1f2937' })
+        textY += labelLineHeight
+      })
+
+      const scoreText = `${question.score}/${question.maxScore}`
+      const scoreColor =
+        question.maxScore > 0 && question.score >= question.maxScore
+          ? '#15803d'
+          : question.score === 0
+            ? '#b91c1c'
+            : '#b45309'
+      primitives.push({
+        kind: 'text',
+        x: padX + contentW - rowPadX - measureWidth(scoreText, scoreSize, 700),
+        y: y + rowPadY,
+        text: scoreText,
+        size: scoreSize,
+        weight: 700,
+        color: scoreColor,
+      })
+
+      if (noteLines.length > 0) {
+        textY += 8
+        noteLines.forEach((line) => {
+          primitives.push({ kind: 'text', x: padX + rowPadX, y: textY, text: line, size: noteSize, weight: 400, color: '#6b7280' })
+          textY += noteLineHeight
+        })
+      }
+
+      y += rowHeight
+
+      if (questionIndex < section.questions.length - 1) {
+        primitives.push({ kind: 'line', x: padX + rowPadX, y, w: contentW - rowPadX * 2, color: divider, thickness: 1 })
+      }
+    })
+
+    y += 42
+  })
+
+  // ---- Free-text sections ----
+  const drawTextSection = (title: string, body: string) => {
+    drawSectionBand(title)
+    const pad = 32
+    const bodySize = 28
+    const lineHeight = bodySize * 1.55
+    const bodyLines = wrap(body, bodySize, 400, contentW - pad * 2)
+    const cardH = pad * 2 + bodyLines.length * lineHeight
+    primitives.push({ kind: 'rect', x: padX, y, w: contentW, h: cardH, radius: 20, fill: '#f8fafc' })
+
+    let textY = y + pad
+    bodyLines.forEach((line) => {
+      primitives.push({ kind: 'text', x: padX + pad, y: textY, text: line, size: bodySize, weight: 400, color: '#1f2937' })
+      textY += lineHeight
+    })
+
+    y += cardH + 42
+  }
+
+  if (params.operationSuggestions.trim()) {
+    drawTextSection('运营提升建议', params.operationSuggestions.trim())
   }
 
   if (params.storeFeedback.trim()) {
-    blocks.push(
-      { text: '门店反馈', fontSize: 30, fontWeight: 700, indent: 0, lineHeight: 42, gapAfter: 10, color: '#0f766e' },
-      {
-        text: params.storeFeedback.trim(),
-        fontSize: 20,
-        fontWeight: 400,
-        indent: 0,
-        lineHeight: 30,
-        gapAfter: 16,
-        color: '#111827',
-      },
-    )
+    drawTextSection('门店反馈', params.storeFeedback.trim())
   }
 
-  const laidOutBlocks = blocks.map((block) => {
-    const wrappedLines = wrapText(block.text, block.fontSize, block.fontWeight, contentWidth - block.indent)
-    return {
-      ...block,
-      wrappedLines,
-      height: wrappedLines.length * block.lineHeight + block.gapAfter,
-    }
+  // ---- Footer ----
+  y += 6
+  primitives.push({ kind: 'line', x: padX, y, w: contentW, color: divider, thickness: 1 })
+  y += 26
+  primitives.push({
+    kind: 'text',
+    x: padX,
+    y,
+    text: `生成时间：${new Date().toLocaleString('zh-CN')}`,
+    size: 23,
+    weight: 400,
+    color: muted,
   })
+  y += 23 * 1.4
 
-  const totalHeight = laidOutBlocks.reduce((sum, block) => sum + block.height, marginY * 2)
+  // ---- Render ----
+  const height = Math.ceil(y + padBottom)
   const canvas = document.createElement('canvas')
-  canvas.width = canvasWidth
-  canvas.height = totalHeight
+  canvas.width = width
+  canvas.height = height
 
   const context = canvas.getContext('2d')
 
   if (!context) {
-    throw new Error('无法创建 PNG 渲染画布。')
+    throw new Error('无法创建渲染画布。')
   }
 
   context.fillStyle = '#ffffff'
-  context.fillRect(0, 0, canvas.width, canvas.height)
+  context.fillRect(0, 0, width, height)
   context.textBaseline = 'top'
 
-  let cursorY = marginY
+  const traceRoundRect = (rectX: number, rectY: number, rectW: number, rectH: number, radius: number) => {
+    const r = Math.max(0, Math.min(radius, rectW / 2, rectH / 2))
+    context.beginPath()
+    context.moveTo(rectX + r, rectY)
+    context.arcTo(rectX + rectW, rectY, rectX + rectW, rectY + rectH, r)
+    context.arcTo(rectX + rectW, rectY + rectH, rectX, rectY + rectH, r)
+    context.arcTo(rectX, rectY + rectH, rectX, rectY, r)
+    context.arcTo(rectX, rectY, rectX + rectW, rectY, r)
+    context.closePath()
+  }
 
-  laidOutBlocks.forEach((block) => {
-    context.font = `${block.fontWeight} ${block.fontSize}px ${fontFamily}`
-    context.fillStyle = block.color ?? '#111827'
+  primitives.forEach((primitive) => {
+    if (primitive.kind === 'rect') {
+      traceRoundRect(primitive.x, primitive.y, primitive.w, primitive.h, primitive.radius)
+      context.fillStyle = primitive.fill
+      context.fill()
+      return
+    }
 
-    block.wrappedLines.forEach((line) => {
-      context.fillText(line, marginX + block.indent, cursorY)
-      cursorY += block.lineHeight
-    })
+    if (primitive.kind === 'line') {
+      context.strokeStyle = primitive.color
+      context.lineWidth = primitive.thickness
+      context.beginPath()
+      context.moveTo(primitive.x, primitive.y + 0.5)
+      context.lineTo(primitive.x + primitive.w, primitive.y + 0.5)
+      context.stroke()
+      return
+    }
 
-    cursorY += block.gapAfter
+    context.font = fontString(primitive.size, primitive.weight)
+    context.fillStyle = primitive.color
+    context.fillText(primitive.text, primitive.x, primitive.y)
   })
+
+  return canvas
+}
+
+async function buildPngBlob(params: SummaryRenderParams): Promise<Blob> {
+  const canvas = buildSummaryCanvas(params)
 
   return await new Promise<Blob>((resolve, reject) => {
     canvas.toBlob((blob) => {
@@ -486,17 +567,82 @@ async function buildPngBlob(
   })
 }
 
+function buildPdfBlob(params: SummaryRenderParams): Blob {
+  const canvas = buildSummaryCanvas(params)
+  const imageData = canvas.toDataURL('image/png')
+
+  const pdf = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' })
+  pdf.setProperties({
+    title: `巡店评分汇总 - ${params.storeName}`,
+    subject: `综合评分 ${params.totalScore}/${params.maxScore}`,
+    author: params.inspectorName,
+    creator: 'Seoul Good 巡店评分表',
+    keywords: [params.storeName, params.inspectionDate, '巡店评分'].join(', '),
+  })
+
+  const pageWidth = pdf.internal.pageSize.getWidth()
+  const pageHeight = pdf.internal.pageSize.getHeight()
+  const imageWidth = pageWidth
+  const imageHeight = (canvas.height / canvas.width) * imageWidth
+
+  let heightLeft = imageHeight
+  let position = 0
+
+  pdf.addImage(imageData, 'PNG', 0, position, imageWidth, imageHeight)
+  heightLeft -= pageHeight
+
+  while (heightLeft > 0) {
+    position -= pageHeight
+    pdf.addPage()
+    pdf.addImage(imageData, 'PNG', 0, position, imageWidth, imageHeight)
+    heightLeft -= pageHeight
+  }
+
+  return pdf.output('blob')
+}
+
 function isBlobUrl(value: string) {
   return value.startsWith('blob:')
 }
 
-function getPngFileName() {
+function sanitizeFileNamePart(value: string): string {
+  return value
+    .replace(/[\\/:*?"<>|]/g, '')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .trim()
+}
+
+function formatDateForFileName(inspectionDate: string): string {
+  const match = inspectionDate.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/)
+
+  if (match) {
+    const [, year, month, day, hour, minute] = match
+    return `${year}${month}${day}-${hour}${minute}`
+  }
+
   const date = new Date()
   const year = date.getFullYear()
   const month = String(date.getMonth() + 1).padStart(2, '0')
   const day = String(date.getDate()).padStart(2, '0')
+  const hour = String(date.getHours()).padStart(2, '0')
+  const minute = String(date.getMinutes()).padStart(2, '0')
 
-  return `巡店评分汇总-${year}${month}${day}.png`
+  return `${year}${month}${day}-${hour}${minute}`
+}
+
+function getSummaryFileName(params: {
+  storeName: string
+  inspectionDate: string
+  totalScore: number
+  maxScore: number
+  extension: string
+}): string {
+  const store = sanitizeFileNamePart(params.storeName) || '未填写门店'
+  const datePart = formatDateForFileName(params.inspectionDate)
+
+  return `巡店评分_${store}_${datePart}_${params.totalScore}-${params.maxScore}分.${params.extension}`
 }
 
 async function blobToDataUrl(blob: Blob): Promise<string> {
@@ -701,9 +847,9 @@ function App() {
   const [storeFeedback, setStoreFeedback] = useState('')
   const [answers, setAnswers] = useState<AnswerMap>(() => buildInitialAnswers())
   const [labelOverrides, setLabelOverrides] = useState<Record<string, string>>(() => ({}))
+  const [questionNotes, setQuestionNotes] = useState<Record<string, string>>(() => ({}))
   const [submitting, setSubmitting] = useState(false)
   const [previewMode, setPreviewMode] = useState<PreviewMode | null>(null)
-  const [previewContent, setPreviewContent] = useState('')
   const [previewUrl, setPreviewUrl] = useState('')
   const [notice, setNotice] = useState<Notice>(() =>
     supabaseConfigured
@@ -764,49 +910,36 @@ function App() {
     }
 
     setPreviewUrl('')
-    setPreviewContent('')
     setPreviewMode(null)
   }
 
-  const openCsvPreview = () => {
-    const csv = buildCsvPreview({
-      inspectorName: inspectorName.trim() || '未填写',
-      storeName: storeName.trim() || '未填写',
-      inspectionDate,
-      operationSuggestions,
-      storeFeedback,
-      answers,
-      labelOverrides,
-    })
-
-    setPreviewContent(csv)
-    setPreviewMode('csv')
-  }
+  const buildSummaryParams = (): SummaryRenderParams => ({
+    inspectorName: inspectorName.trim() || '未填写',
+    storeName: storeName.trim() || '未填写',
+    inspectionDate,
+    totalScore,
+    maxScore,
+    scorePercent,
+    completionPercent,
+    operationSuggestions,
+    storeFeedback,
+    sectionStats: sectionStats.map((section) => ({
+      title: section.section.title,
+      sectionScore: section.sectionScore,
+      sectionMaxScore: section.sectionMaxScore,
+      answeredCount: section.answeredCount,
+      questions: section.section.questions.map((question) => ({
+        label: labelOverrides[question.id] ?? question.label,
+        score: getQuestionScore(question, answers[question.id]),
+        maxScore: question.maxScore,
+        note: questionNotes[question.id],
+      })),
+    })),
+  })
 
   const openPngPreview = async () => {
     try {
-      const blob = await buildPngBlob({
-        inspectorName: inspectorName.trim() || '未填写',
-        storeName: storeName.trim() || '未填写',
-        inspectionDate,
-        totalScore,
-        maxScore,
-        scorePercent,
-        completionPercent,
-        operationSuggestions,
-        storeFeedback,
-        sectionStats: sectionStats.map((section) => ({
-          title: section.section.title,
-          sectionScore: section.sectionScore,
-          sectionMaxScore: section.sectionMaxScore,
-          answeredCount: section.answeredCount,
-          questions: section.section.questions.map((question) => ({
-            label: labelOverrides[question.id] ?? question.label,
-            score: getQuestionScore(question, answers[question.id]),
-            maxScore: question.maxScore,
-          })),
-        })),
-      })
+      const blob = await buildPngBlob(buildSummaryParams())
 
       const url = await blobToDataUrl(blob)
       if (previewUrl && isBlobUrl(previewUrl)) {
@@ -814,17 +947,35 @@ function App() {
       }
 
       setPreviewUrl(url)
-      setPreviewContent('')
       setPreviewMode('png')
     } catch {
       setNotice({
         tone: 'error',
-        message: 'PNG preview could not be loaded. Try again or use the CSV preview.',
+        message: 'PNG 预览生成失败，请重试或使用其他预览。',
       })
     }
   }
 
-  const openPngInNewTab = () => {
+  const openPdfPreview = () => {
+    try {
+      const blob = buildPdfBlob(buildSummaryParams())
+      const url = URL.createObjectURL(blob)
+
+      if (previewUrl && isBlobUrl(previewUrl)) {
+        URL.revokeObjectURL(previewUrl)
+      }
+
+      setPreviewUrl(url)
+      setPreviewMode('pdf')
+    } catch {
+      setNotice({
+        tone: 'error',
+        message: 'PDF 预览生成失败，请重试或使用其他预览。',
+      })
+    }
+  }
+
+  const openPreviewUrlInNewTab = () => {
     if (!previewUrl) {
       return
     }
@@ -839,7 +990,33 @@ function App() {
 
     const link = document.createElement('a')
     link.href = previewUrl
-    link.download = getPngFileName()
+    link.download = getSummaryFileName({
+      storeName: storeName.trim() || '未填写门店',
+      inspectionDate,
+      totalScore,
+      maxScore,
+      extension: 'png',
+    })
+    link.rel = 'noopener'
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+  }
+
+  const downloadPdfPreview = () => {
+    if (!previewUrl) {
+      return
+    }
+
+    const link = document.createElement('a')
+    link.href = previewUrl
+    link.download = getSummaryFileName({
+      storeName: storeName.trim() || '未填写门店',
+      inspectionDate,
+      totalScore,
+      maxScore,
+      extension: 'pdf',
+    })
     link.rel = 'noopener'
     document.body.appendChild(link)
     link.click()
@@ -883,13 +1060,16 @@ function App() {
       inspectionDate,
       answers,
       labelOverrides,
+      questionNotes,
     })
 
     const answerSummary = rubricSections
       .map((section) => {
         const sectionLines = section.questions.map((question) => {
           const label = labelOverrides[question.id] ?? question.label
-          return `- ${label}: ${formatQuestionAnswer(question, answers[question.id])}`
+          const note = questionNotes[question.id]?.trim()
+          const base = `- ${label}: ${formatQuestionAnswer(question, answers[question.id])}`
+          return note ? `${base}（备注：${note}）` : base
         })
 
         return [section.title, ...sectionLines].join('\n')
@@ -976,7 +1156,7 @@ function App() {
     }
   }
 
-  const previewTitle = previewMode === 'csv' ? 'CSV 预览' : 'PNG 预览'
+  const previewTitle = previewMode === 'png' ? 'PNG 预览' : 'PDF 预览'
 
   return (
     <div className="page-shell">
@@ -1107,6 +1287,17 @@ function App() {
                             onChange={(score) => setQuestionScore(question.id, score)}
                             displayLabel={labelOverrides[question.id] ?? question.label}
                           />
+                          <label className="question-note">
+                            <span>备注（可选）</span>
+                            <textarea
+                              value={questionNotes[question.id] ?? ''}
+                              onChange={(event) =>
+                                setQuestionNotes((current) => ({ ...current, [question.id]: event.target.value }))
+                              }
+                              placeholder="填写补充说明（可选）"
+                              rows={2}
+                            />
+                          </label>
                         </article>
                       ))}
                     </div>
@@ -1244,11 +1435,11 @@ function App() {
               </div>
 
               <div className="preview-actions">
-                <button type="button" className="secondary-button" onClick={openCsvPreview}>
-                  CSV 预览
-                </button>
                 <button type="button" className="secondary-button" onClick={openPngPreview}>
                   PNG 预览
+                </button>
+                <button type="button" className="secondary-button" onClick={openPdfPreview}>
+                  PDF 预览
                 </button>
               </div>
 
@@ -1273,16 +1464,11 @@ function App() {
               </button>
             </div>
 
-            {previewMode === 'csv' ? (
-              <div className="csv-preview-panel">
-                <p className="preview-caption">CSV 内容已生成，可直接复制或快速核对。</p>
-                <pre className="csv-preview">{previewContent}</pre>
-              </div>
-            ) : (
+            {previewMode === 'png' ? (
               <div className="png-preview-panel">
                 <p className="preview-caption">PNG 已在浏览器里生成并直接显示。</p>
                 <div className="png-preview-actions">
-                  <button type="button" className="secondary-button" onClick={openPngInNewTab} disabled={!previewUrl}>
+                  <button type="button" className="secondary-button" onClick={openPreviewUrlInNewTab} disabled={!previewUrl}>
                     打开原图
                   </button>
                   <button type="button" className="secondary-button" onClick={downloadPngPreview} disabled={!previewUrl}>
@@ -1290,6 +1476,19 @@ function App() {
                   </button>
                 </div>
                 <img className="png-preview-image" src={previewUrl} alt="PNG 预览" />
+              </div>
+            ) : (
+              <div className="pdf-preview-panel">
+                <p className="preview-caption">PDF 已在浏览器里生成，可直接下载分享。文件名包含门店、时间和得分。</p>
+                <div className="png-preview-actions">
+                  <button type="button" className="secondary-button" onClick={openPreviewUrlInNewTab} disabled={!previewUrl}>
+                    新标签打开
+                  </button>
+                  <button type="button" className="secondary-button" onClick={downloadPdfPreview} disabled={!previewUrl}>
+                    下载 PDF
+                  </button>
+                </div>
+                <iframe className="pdf-preview-frame" src={previewUrl} title="PDF 预览" />
               </div>
             )}
           </div>

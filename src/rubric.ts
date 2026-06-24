@@ -21,14 +21,27 @@ export const rubricSections: RubricSection[] = [
   {
     id: 'overall',
     title: '餐食总项',
+    summary: '餐台整体效果（共 10 分）',
     questions: [
       {
-        id: 'overall_impression',
-        label: '整体餐台效果',
-        maxScore: 10,
-        answerType: 'score'
-      }
-    ]
+        id: 'overall_supply',
+        label: '食物充足不空盘（不超过4盘）',
+        maxScore: 4,
+        answerType: 'score',
+      },
+      {
+        id: 'overall_portion',
+        label: '出餐饱满',
+        maxScore: 5,
+        answerType: 'score',
+      },
+      {
+        id: 'overall_label',
+        label: '标签布局合理，可见，整齐，干净，破损的及时跟换',
+        maxScore: 1,
+        answerType: 'score',
+      },
+    ],
   },
   {
     id: 'hot_dishes',
@@ -257,43 +270,33 @@ export const rubricSections: RubricSection[] = [
     questions: [
       {
         id: 'ingredients_goods',
-        label: '食材与货物',
-        description: '不得直接摆放于地面',
+        label: '食材与货物不得直接摆放于地面',
         maxScore: 2,
-        answerType: 'boolean',
-        booleanScoring: 'normal',
+        answerType: 'score',
       },
       {
         id: 'floors_clean',
-        label: '地面',
-        description: '地面必须保持整洁，不得出现湿滑，油污附着现象',
+        label: '地面必须保持整洁，不得出现湿滑，油污附着现象',
         maxScore: 2,
-        answerType: 'boolean',
-        booleanScoring: 'normal',
+        answerType: 'score',
       },
       {
         id: 'expired_management',
-        label: '过期管理',
-        description: '在保质期内使用食材',
+        label: '有无过期产品在使用',
         maxScore: 2,
-        answerType: 'boolean',
-        booleanScoring: 'normal',
+        answerType: 'score',
       },
       {
         id: 'kitchen_equipment',
-        label: '厨房设备',
-        description: '后厨设备内外干净整洁，有无定期清洁',
+        label: '后厨设备内外干净整洁，有无定期清洁',
         maxScore: 2,
-        answerType: 'boolean',
-        booleanScoring: 'normal',
+        answerType: 'score',
       },
       {
         id: 'storage_and_utensils',
-        label: '食材保存与器皿使用',
-        description: '是否按照要求保存食材，使用器皿及厨房设备',
+        label: '是否按照要求保存食材，使用器皿及厨房设备',
         maxScore: 2,
-        answerType: 'boolean',
-        booleanScoring: 'normal',
+        answerType: 'score',
       },
     ],
   },
@@ -305,12 +308,11 @@ export const rubricSections: RubricSection[] = [
       {
         id: 'queue_and_collection',
         label: '不在吧台聚集，时刻保持巡桌，收餐盘及时',
-        description: '不在吧台聚集，时刻保持巡桌，收餐盘及时',
         maxScore: 2,
       },
-      { id: 'kassa_use', label: '服务人员 Kassa 使用熟练、语言流利', description: '服务人员使用收银系统熟练，语言表达流利', maxScore: 1 },
-      { id: 'dress_code', label: '工作时着工装、仪表整洁', description: '工作时着工装且干净整洁，不戴耳机或玩手机', maxScore: 1 },
-      { id: 'service_attitude', label: '服务礼貌、主动介绍与微笑', description: '服务人员态度热情礼貌，面带微笑，进离店打招呼，主动介绍', maxScore: 1 },
+      { id: 'kassa_use', label: '服务人员Kassa使用熟练，语言流利', maxScore: 1 },
+      { id: 'dress_code', label: '工作时着工装，且干净整洁，不戴耳机，玩手机', maxScore: 1 },
+      { id: 'service_attitude', label: '服务要求热情礼貌，面带微笑，进离店打招呼，主动介绍', maxScore: 1 },
     ],
   },
   {
@@ -318,9 +320,9 @@ export const rubricSections: RubricSection[] = [
     title: '其他与反馈',
     summary: 'Google / Wolt / 指定供货商采购（共 6 分）',
     questions: [
-      { id: 'google_rating', label: 'Google map 评分大于等于 4.3 得 1 分', description: 'Google map 评分大于等于 4.3 得 1 分', maxScore: 1 },
-      { id: 'wolt_rating', label: 'Wolt 评分大于等于 8.8 得 1 分', description: 'Wolt 评分大于等于 8.8 得 1 分', maxScore: 1 },
-      { id: 'procurement_req', label: '按公司要求指定供应商采购', description: '根据公司要求，从指定供货商处采购指定商品', maxScore: 3 },
+      { id: 'google_rating', label: 'Google map评分大于等于4.3分得1分', maxScore: 1 },
+      { id: 'wolt_rating', label: 'Wolt评分大于等于8.8得1分', maxScore: 1 },
+      { id: 'procurement_req', label: '根据公司要求，从指定供货商处采购指定商品', maxScore: 3 },
     ],
   },
 ]

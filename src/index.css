@@ -577,6 +577,24 @@ textarea:focus {
   line-height: 1.6;
 }
 
+.question-note {
+  display: grid;
+  gap: 6px;
+  color: var(--text-soft);
+  font-weight: 600;
+}
+
+.question-note span {
+  font-size: 0.85rem;
+}
+
+.question-note textarea {
+  min-height: 44px;
+  padding: 10px 12px;
+  font-weight: 500;
+  resize: vertical;
+}
+
 .score-group {
   display: flex;
   flex-wrap: wrap;
@@ -919,10 +937,20 @@ textarea:focus {
 }
 
 .csv-preview-panel,
-.png-preview-panel {
+.png-preview-panel,
+.pdf-preview-panel {
   display: grid;
   gap: 12px;
   min-height: 0;
+}
+
+.pdf-preview-frame {
+  width: 100%;
+  height: min(64vh, 760px);
+  border: 1px solid rgba(36, 49, 69, 0.12);
+  border-radius: 20px;
+  background: white;
+  box-shadow: 0 18px 40px rgba(17, 27, 43, 0.12);
 }
 
 .csv-preview {
