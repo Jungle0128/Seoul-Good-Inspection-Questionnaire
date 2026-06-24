@@ -848,6 +848,7 @@ function App() {
   const [answers, setAnswers] = useState<AnswerMap>(() => buildInitialAnswers())
   const [labelOverrides, setLabelOverrides] = useState<Record<string, string>>(() => ({}))
   const [questionNotes, setQuestionNotes] = useState<Record<string, string>>(() => ({}))
+  const [highlightQuestionId, setHighlightQuestionId] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [previewMode, setPreviewMode] = useState<PreviewMode | null>(null)
   const [previewUrl, setPreviewUrl] = useState('')
@@ -1028,6 +1029,23 @@ function App() {
       ...current,
       [questionId]: score,
     }))
+    setHighlightQuestionId((current) => (current === questionId ? null : current))
+  }
+
+  const focusFirstMissingQuestion = () => {
+    const firstMissing = missingQuestions[0]
+
+    if (!firstMissing) {
+      return
+    }
+
+    const element = document.getElementById(`question-${firstMissing.question.id}`)
+    element?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+
+    setHighlightQuestionId(firstMissing.question.id)
+    window.setTimeout(() => {
+      setHighlightQuestionId((current) => (current === firstMissing.question.id ? null : current))
+    }, 2600)
   }
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -1035,14 +1053,16 @@ function App() {
 
     if (!allFieldsFilled) {
       setNotice({ tone: 'error', message: '检查员、门店和日期不能为空。' })
+      document.getElementById('inspection-info-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
       return
     }
 
     if (missingQuestions.length > 0) {
       setNotice({
         tone: 'error',
-        message: `请先完成剩余 ${missingQuestions.length} 个评分项，再提交。`,
+        message: `请先完成剩余 ${missingQuestions.length} 个评分项，已为你跳转到第一个未填的题目。`,
       })
+      focusFirstMissingQuestion()
       return
     }
 
@@ -1199,7 +1219,7 @@ function App() {
 
         <div className="content-grid">
           <form className="form-column" onSubmit={handleSubmit}>
-            <section className="panel panel-overflow-visible">
+            <section id="inspection-info-panel" className="panel panel-overflow-visible">
               <div className="panel-header">
                 <div>
                   <h2>检查信息</h2>
@@ -1267,7 +1287,13 @@ function App() {
 
                     <div className="question-list">
                       {section.questions.map((question) => (
-                        <article key={question.id} className="question-card">
+                        <article
+                          key={question.id}
+                          id={`question-${question.id}`}
+                          className={
+                            highlightQuestionId === question.id ? 'question-card question-card-highlight' : 'question-card'
+                          }
+                        >
                           <div className="question-copy">
                             {(question.id === 'hot_16') ? (
                               <input
